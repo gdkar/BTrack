@@ -33,12 +33,12 @@
 
 static void resampleOnsetDetectionFunction(struct btrack * bt);
 static void calculateTempo(struct btrack * bt);
-static void adaptiveThreshold(double * x, int N, double * aux_buffer);
+static void adaptiveThreshold(float * x, int N, float * aux_buffer);
 static void calculateOutputOfCombFilterBank(struct btrack * bt);
-static void calculateBalancedACF(double * onsetDetectionFunction, double * acf);
-static double calculateMeanOfArray(double * array, int startIndex, int endIndex);
-static void normaliseArray(double * array, int N);
-static void updateCumulativeScore(struct btrack * bt, double odfSample);
+static void calculateBalancedACF(float * onsetDetectionFunction, float * acf);
+static float calculateMeanOfArray(float * array, int startIndex, int endIndex);
+static void normaliseArray(float * array, int N);
+static void updateCumulativeScore(struct btrack * bt, float odfSample);
 static void predictBeat(struct btrack * bt);
 
 int btrack_init(struct btrack * bt, int hop_size, int frame_size){
@@ -49,7 +49,7 @@ int btrack_init(struct btrack * bt, int hop_size, int frame_size){
     rc = odf_init(&bt->odf, hop_size, frame_size, ComplexSpectralDifferenceHWR, HanningWindow); 
     ASSERT(!rc);
 
-    double rayparam = 43;
+    float rayparam = 43;
 	
     // initialise parameters
     bt->tightness = 5;
@@ -65,7 +65,7 @@ int btrack_init(struct btrack * bt, int hop_size, int frame_size){
 
 	// create rayleigh weighting vector
 	for (int n = 0;n < 128;n++) {
-		bt->weightingVector[n] = ((double) n / SQR(rayparam)) * exp((-1*SQR((double)-n)) / (2*SQR(rayparam)));
+		bt->weightingVector[n] = ((float) n / SQR(rayparam)) * exp(-0.5*SQR(n/rayparam));
 	}
 	
 	// initialise prev_delta
@@ -73,9 +73,9 @@ int btrack_init(struct btrack * bt, int hop_size, int frame_size){
 		bt->prevDelta[i] = 1;
 	}
 	
-	double t_mu = 41/2;
-	double m_sig;
-	double x;
+	float t_mu = 41/2;
+	float m_sig;
+	float x;
 	// create tempo transition matrix
 	m_sig = 41/8;
 	for (int i = 0;i < 41;i++) {
@@ -108,29 +108,29 @@ int btrack_beat_due_in_current_frame(struct btrack * bt){
     return bt->beatDueInFrame;
 }
 
-double btrack_get_bpm(struct btrack * bt){
+float btrack_get_bpm(struct btrack * bt){
     return bt->estimatedTempo;
 }
 
-double btrack_get_latest_score(struct btrack * bt){
+float btrack_get_latest_score(struct btrack * bt){
     return bt->latestCumulativeScoreValue;
 }
 
-double btrack_get_latest_odf(struct btrack * bt){
+float btrack_get_latest_odf(struct btrack * bt){
     return bt->latestODF;
 }
 
-void btrack_process_audio_frame(struct btrack * bt, double * frame){
-    double sample = odf_calculate_sample(&bt->odf, frame);
+void btrack_process_audio_frame(struct btrack * bt, float * frame){
+    float sample = odf_calculate_sample(&bt->odf, frame);
     btrack_process_odf_sample(bt, sample);
 }
 
-void btrack_process_odf_sample(struct btrack * bt, double odf_sample){
+void btrack_process_odf_sample(struct btrack * bt, float odf_sample){
     // we need to ensure that the onset
     // detection function sample is positive
     // add a tiny constant to the sample to stop it from ever going
     // to zero. this is to avoid problems further down the line
-    odf_sample = fabs(odf_sample) + 0.0001;
+    odf_sample = fabs(odf_sample + 0.0001);
     
 	bt->m0--;
 	bt->beatCounter--;
@@ -164,7 +164,7 @@ void btrack_process_odf_sample(struct btrack * bt, double odf_sample){
 	}
 }
 
-void btrack_set_bpm(struct btrack * bt, double bpm){
+void btrack_set_bpm(struct btrack * bt, float bpm){
 	/////////// TEMPO INDICATION RESET //////////////////
 	
 	// firstly make sure tempo is between 80 and 160 bpm..
@@ -189,7 +189,7 @@ void btrack_set_bpm(struct btrack * bt, double bpm){
 	/////////// CUMULATIVE SCORE ARTIFICAL TEMPO UPDATE //////////////////
 	
 	// calculate new beat period
-	int new_bperiod = (int) round(60/((((double) bt->hopSize)/44100)*bpm));
+	int new_bperiod = (int) round(60/((((float) bt->hopSize)/44100)*bpm));
 	
 	int bcounter = 1;
 	// initialise df_buffer to zeros
@@ -215,10 +215,10 @@ void btrack_set_bpm(struct btrack * bt, double bpm){
 	bt->beatCounter = 0;
 	
 	// offbeat is half of new beat period away
-	bt->m0 = (int) round(((double) new_bperiod)/2);
+	bt->m0 = (int) round(((float) new_bperiod)/2);
 }
 
-void btrack_fix_bpm(struct btrack * bt, double bpm){
+void btrack_fix_bpm(struct btrack * bt, float bpm){
 	// firstly make sure tempo is between 80 and 160 bpm..
 	while (bpm > 160) {
 		bpm = bpm/2;
@@ -252,20 +252,20 @@ void btrack_set_hop_size(struct btrack * bt, int hop_size){
 	bt->onsetDFBufferSize = (512*512)/bt->hopSize;		// calculate df buffer size
 
     free(bt->onsetDF);
-    bt->onsetDF = malloc(bt->onsetDFBufferSize * sizeof(double));
+    bt->onsetDF = malloc(bt->onsetDFBufferSize * sizeof(float));
     ASSERT(bt->onsetDF);
 
     free(bt->cumulativeScore);
-    bt->cumulativeScore = malloc(bt->onsetDFBufferSize * sizeof(double));
+    bt->cumulativeScore = malloc(bt->onsetDFBufferSize * sizeof(float));
     ASSERT(bt->cumulativeScore);
 
     free(bt->w1);
-    bt->w1 = malloc((1 + bt->onsetDFBufferSize) * sizeof(double));
+    bt->w1 = malloc((1 + bt->onsetDFBufferSize) * sizeof(float));
     ASSERT(bt->w1);
 
     bt->onsetDFBufferSize = (512*512)/bt->hopSize;      // calculate df buffer size
     
-    bt->beatPeriod = round(60/((((double) bt->hopSize)/44100)*bt->tempo));
+    bt->beatPeriod = round(60/((((float) bt->hopSize)/44100)*bt->tempo));
 
     // initialise df_buffer to zeros
     for (int i = 0;i < bt->onsetDFBufferSize;i++) {
@@ -288,12 +288,12 @@ static void resampleOnsetDetectionFunction(struct btrack * bt) {
         input[i] = (float) bt->onsetDF[i];
     }
 		
-	double src_ratio = 512.0/((double) bt->onsetDFBufferSize);
+	float src_ratio = 512.0/((float) bt->onsetDFBufferSize);
 	int BUFFER_LEN = bt->onsetDFBufferSize;
 	int output_len;
 	SRC_DATA	src_data ;
 	
-	//output_len = (int) floor (((double) BUFFER_LEN) * src_ratio) ;
+	//output_len = (int) floor (((float) BUFFER_LEN) * src_ratio) ;
 	output_len = 512;
 	
 	src_data.data_in = input;
@@ -307,13 +307,13 @@ static void resampleOnsetDetectionFunction(struct btrack * bt) {
 	src_simple (&src_data, SRC_SINC_BEST_QUALITY, 1);
 			
 	for (int i = 0;i < output_len;i++) {
-		bt->resampledOnsetDF[i] = (double) src_data.data_out[i];
+		bt->resampledOnsetDF[i] = (float) src_data.data_out[i];
 	}
     free(input);
 }
 
 static void calculateTempo(struct btrack * bt){
-    double aux_buffer[512];
+    float aux_buffer[512];
 	// adaptive threshold on input
 	adaptiveThreshold(bt->resampledOnsetDF,512, aux_buffer);
 		
@@ -331,17 +331,17 @@ static void calculateTempo(struct btrack * bt){
 	int t_index2;
 	// calculate tempo observation vector from beat period observation vector
 	for (int i = 0;i < 41;i++) {
-		t_index = (int) round(bt->tempoToLagFactor / ((double) ((2*i)+80)));
-		t_index2 = (int) round(bt->tempoToLagFactor / ((double) ((4*i)+160)));
+		t_index = (int) round(bt->tempoToLagFactor / ((float) ((2*i)+80)));
+		t_index2 = (int) round(bt->tempoToLagFactor / ((float) ((4*i)+160)));
 
 		
 		bt->tempoObservationVector[i] = bt->combFilterBankOutput[t_index-1] + bt->combFilterBankOutput[t_index2-1];
 	}
 	
 	
-	double maxval;
-	double maxind;
-	double curval;
+	float maxval;
+	float maxind;
+	float curval;
 	
 	// if tempo is fixed then always use a fixed set of tempi as the previous observation probability function
 	if(bt->tempoFixed) {
@@ -377,16 +377,16 @@ static void calculateTempo(struct btrack * bt){
 		bt->prevDelta[j] = bt->delta[j];
 	}
 	
-	bt->beatPeriod = round((60.0*44100.0)/(((2*maxind)+80)*((double) bt->hopSize)));
+	bt->beatPeriod = round((60.0*44100.0)/(((2*maxind)+80)*((float) bt->hopSize)));
 	if (bt->beatPeriod > 0) {
-		bt->estimatedTempo = 60.0/((((double) bt->hopSize) / 44100.0)*bt->beatPeriod);
+		bt->estimatedTempo = 60.0/((((float) bt->hopSize) / 44100.0)*bt->beatPeriod);
 	}
 }
 
-static void adaptiveThreshold(double * x, int N, double * aux_buffer) {
+static void adaptiveThreshold(float * x, int N, float * aux_buffer) {
 	int i = 0;
 	int k,t = 0;
-	double * x_thresh = aux_buffer;
+	float * x_thresh = aux_buffer;
 	
 	int p_post = 7;
 	int p_pre = 8;
@@ -438,9 +438,9 @@ static void calculateOutputOfCombFilterBank(struct btrack * bt) {
 	}
 }
 
-static void calculateBalancedACF(double *onsetDetectionFunction, double * acf) {
+static void calculateBalancedACF(float *onsetDetectionFunction, float * acf) {
 	int l, n = 0;
-	double sum, tmp;
+	float sum, tmp;
 	
 	// for l lags from 0-511
 	for (l = 0;l < 512;l++) {
@@ -456,9 +456,9 @@ static void calculateBalancedACF(double *onsetDetectionFunction, double * acf) {
 	}
 }
 
-static double calculateMeanOfArray(double *array, int startIndex,int endIndex) {
+static float calculateMeanOfArray(float *array, int startIndex,int endIndex) {
 	int i;
-	double sum = 0;
+	float sum = 0;
 
     int length = endIndex - startIndex;
 	
@@ -474,8 +474,8 @@ static double calculateMeanOfArray(double *array, int startIndex,int endIndex) {
     }
 }
 
-static void normaliseArray(double * array, int N){
-	double sum = 0;
+static void normaliseArray(float * array, int N){
+	float sum = 0;
 	
 	for (int i = 0;i < N;i++) {
 		if (array[i] > 0) {
@@ -490,16 +490,16 @@ static void normaliseArray(double * array, int N){
 	}
 }
 
-static void updateCumulativeScore(struct btrack * bt, double odfSample) {	 
+static void updateCumulativeScore(struct btrack * bt, float odfSample) {	 
 	int start, end, winsize;
-	double max;
+	float max;
 	
 	start = bt->onsetDFBufferSize - round(2*bt->beatPeriod);
 	end = bt->onsetDFBufferSize - round(bt->beatPeriod/2);
 	winsize = end-start+1;
 	
-	double v = -2*bt->beatPeriod;
-	double wcumscore;
+	float v = -2*bt->beatPeriod;
+	float wcumscore;
 	
 	
 	// create window
@@ -532,11 +532,11 @@ static void updateCumulativeScore(struct btrack * bt, double odfSample) {
 
 static void predictBeat(struct btrack * bt){
 	int windowSize = (int) bt->beatPeriod;
-	//double futureCumulativeScore[onsetDFBufferSize + windowSize];
-    //double w2[windowSize];
-    double * futureCumulativeScore = malloc((bt->onsetDFBufferSize + windowSize + 1) * sizeof(double));
+	//float futureCumulativeScore[onsetDFBufferSize + windowSize];
+    //float w2[windowSize];
+    float * futureCumulativeScore = malloc((bt->onsetDFBufferSize + windowSize + 1) * sizeof(float));
     ASSERT(futureCumulativeScore);
-    double * w2 = malloc((windowSize + 1) * sizeof(double));
+    float * w2 = malloc((windowSize + 1) * sizeof(float));
     ASSERT(w2);
 
 	// copy cumscore to first part of fcumscore
@@ -545,8 +545,8 @@ static void predictBeat(struct btrack * bt){
 	}
 	
 	// create future window
-	double v = 1;
-  double d = 0.5/SQR(bt->beatPeriod*0.5);
+	float v = 1;
+  float d = 0.5/SQR(bt->beatPeriod*0.5);
 	for (int i = 0;i < windowSize;i++) {
 		w2[i] = exp((-1*SQR((i+1 - (bt->beatPeriod/2))))) * d;
 	}
@@ -563,9 +563,9 @@ static void predictBeat(struct btrack * bt){
 	}
 
 	// calculate future cumulative score
-	double max;
+	float max;
 	int n;
-	double wcumscore;
+	float wcumscore;
 	for (int i = bt->onsetDFBufferSize;i < (bt->onsetDFBufferSize + windowSize); i++) {
 		start = i - round(2*bt->beatPeriod);
 		end = i - round(bt->beatPeriod/2);

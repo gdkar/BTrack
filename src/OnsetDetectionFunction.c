@@ -19,32 +19,33 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 //=======================================================================
-#define _ISOC11_SOURCE
-#define _GNU_SOURCE
-#define _XOPEN_SOURCE
-#include <math.h>
 #include "OnsetDetectionFunction.h"
 #include "common.h"
+#include <math.h>
 
 static void performFFT(struct odf * odf);
-static double princarg(double phaseVal);
 
-static double energyEnvelope(struct odf * odf);
-static double energyDifference(struct odf * odf);
-static double spectralDifference(struct odf * odf);
-static double spectralDifferenceHWR(struct odf * odf);
-static double phaseDeviation(struct odf * odf);
-static double complexSpectralDifference(struct odf * odf);
-static double complexSpectralDifferenceHWR(struct odf * odf);
-static double highFrequencyContent(struct odf * odf);
-static double highFrequencySpectralDifference(struct odf * odf);
-static double highFrequencySpectralDifferenceHWR(struct odf * odf);
-
-static void calculateRectangularWindow(double * window, int frameSize);	
-static void calculateHanningWindow(double * window, int frameSize);		
-static void calclulateHammingWindow(double * window, int frameSize);		
-static void calculateBlackmanWindow(double * window, int frameSize);		
-static void calculateTukeyWindow(double * window, int frameSize);          
+static float energyEnvelope(struct odf * odf);
+static float energyDifference(struct odf * odf);
+static float spectralDifference(struct odf * odf);
+static float spectralDifferenceHWR(struct odf * odf);
+static float phaseDeviation(struct odf * odf);
+static float complexSpectralDifference(struct odf * odf);
+static float complexSpectralDifferenceHWR(struct odf * odf);
+static float highFrequencyContent(struct odf * odf);
+static float highFrequencySpectralDifference(struct odf * odf);
+static float highFrequencySpectralDifferenceHWR(struct odf * odf);
+static inline float __attribute__((unused)) princarg(float arg)
+{
+  static const float one_over_two_pi = 1/(2*M_PI);
+  return arg - (2*M_PI)*floorf(arg*one_over_two_pi);
+}
+static inline __m128 princarg_ps(const __m128);
+static void calculateRectangularWindow(float * window, int frameSize);	
+static void calculateHanningWindow(float * window, int frameSize);		
+static void calclulateHammingWindow(float * window, int frameSize);		
+static void calculateBlackmanWindow(float * window, int frameSize);		
+static void calculateTukeyWindow(float * window, int frameSize);          
 
 int odf_init(struct odf * odf, int hop_size, int frame_size, enum OnsetDetectionFunctionType odf_type, enum WindowType window_type){
     // if we have already initialised FFT plan
@@ -57,13 +58,13 @@ int odf_init(struct odf * odf, int hop_size, int frame_size, enum OnsetDetection
     odf->windowType = window_type;
 		
 	// initialise buffers
-    odf->frame = malloc(sizeof(double) * frame_size);
-    odf->window = malloc(sizeof(double) * frame_size);
-    odf->magSpec = malloc(sizeof(double) * frame_size);
-    odf->prevMagSpec = malloc(sizeof(double) * frame_size);
-    odf->phase = malloc(sizeof(double) * frame_size);
-    odf->prevPhase = malloc(sizeof(double) * frame_size);
-    odf->prevPhase2 = malloc(sizeof(double) * frame_size);
+    odf->frame = malloc(sizeof(float) * frame_size);
+    odf->window = malloc(sizeof(float) * frame_size);
+    odf->magSpec = malloc(sizeof(float) * frame_size);
+    odf->prevMagSpec = malloc(sizeof(float) * frame_size);
+    odf->phase = malloc(sizeof(float) * frame_size);
+    odf->prevPhase = malloc(sizeof(float) * frame_size);
+    odf->prevPhase2 = malloc(sizeof(float) * frame_size);
     ASSERT(odf->frame && odf->window && odf->magSpec && odf->prevMagSpec && odf->phase && odf->prevPhase && odf->prevPhase2);
 	
 	// set the window to the specified type
@@ -88,19 +89,19 @@ int odf_init(struct odf * odf, int hop_size, int frame_size, enum OnsetDetection
 	}
 	
 	// initialise previous magnitude spectrum to zero
-	for (int i = 0;i < frame_size;i++) {
-		odf->prevMagSpec[i] = 0.0;
-		odf->prevPhase[i] = 0.0;
-		odf->prevPhase2[i] = 0.0;
-		odf->frame[i] = 0.0;
-	}
-	
+  memset(odf->prevMagSpec,0,frame_size*sizeof(float));
+  memset(odf->prevPhase,0,frame_size*sizeof(float));
+  memset(odf->prevPhase2,0,frame_size*sizeof(float));
+  memset(odf->frame,0,frame_size*sizeof(float));
 	odf->prevEnergySum = 0.0;	// initialise previous energy sum value to zero
-	
 	/*  Init fft */
-	odf->complexIn = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * frame_size);		// complex array to hold fft data
-	odf->complexOut = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * frame_size);	// complex array to hold fft data
-	odf->p = fftw_plan_dft_1d(frame_size, odf->complexIn, odf->complexOut, FFTW_FORWARD, FFTW_ESTIMATE);	// FFT plan initialisation
+	odf->realIn= (float*) fftwf_malloc(sizeof(float) * frame_size);		// complex array to hold fft data
+	odf->imagIn= (float*) fftwf_malloc(sizeof(float) * frame_size);		// complex array to hold fft data
+	odf->realOut = (float*) fftwf_malloc(sizeof(float) * frame_size);	// complex array to hold fft data
+	odf->imagOut = (float*) fftwf_malloc(sizeof(float) * frame_size);	// complex array to hold fft data
+  fftw_iodim transform_dims[] = {{ .n = frame_size, .is = 1, .os=1}};
+  odf->p = fftwf_plan_guru_split_dft(1, transform_dims, 0, NULL,
+  odf->realIn,odf->imagIn,odf->realOut,odf->imagOut,FFTW_ESTIMATE);
 	
 	odf->initialised = true;
     return 0;
@@ -109,9 +110,11 @@ int odf_init(struct odf * odf, int hop_size, int frame_size, enum OnsetDetection
 void odf_del(struct odf * odf){
     if (odf->initialised) {
         // destroy fft plan
-        fftw_destroy_plan(odf->p);
-        fftw_free(odf->complexIn);
-        fftw_free(odf->complexOut);
+        fftwf_destroy_plan(odf->p);
+        fftwf_free(odf->realIn);
+        fftwf_free(odf->imagIn);
+        fftwf_free(odf->realOut);
+        fftwf_free(odf->imagOut);
     }
 }
 
@@ -119,8 +122,8 @@ void odf_set_type(struct odf * odf, enum OnsetDetectionFunctionType type){
     odf->type = type;
 }
 
-double odf_calculate_sample(struct odf * odf, double * buffer){
-	double odfSample;
+float odf_calculate_sample(struct odf * odf, float * buffer){
+	float odfSample;
 	
   memmove(odf->frame,odf->frame+odf->hopSize,(odf->frameSize-odf->hopSize)*sizeof(odf->frame[0]));
 	
@@ -179,242 +182,237 @@ static void performFFT(struct odf * odf) {
 	int fsize2 = (odf->frameSize/2);
 	
 	// window frame and copy to complex array, swapping the first and second half of the signal
-	for (int i = 0;i < fsize2;i++)
-	{
-		odf->complexIn[i][0] = odf->frame[i+fsize2] * odf->window[i+fsize2];
-		odf->complexIn[i][1] = 0.0;
-		odf->complexIn[i+fsize2][0] = odf->frame[i] * odf->window[i];
-		odf->complexIn[i+fsize2][1] = 0.0;
-	}
-	
+  //
+  for(int i = 0; i < fsize2; i+=4)
+  {
+    *(__m128*)(odf->realIn+fsize2+i) = 
+      _mm_mul_ps(*(__m128*)(odf->frame+i),*(__m128*)(odf->window+i));
+    *(__m128*)(odf->realIn+i) = 
+      _mm_mul_ps(*(__m128*)(odf->frame+fsize2+i),*(__m128*)(odf->window+fsize2+i));
+
+  }
+  memset(odf->imagIn,0,odf->frameSize*sizeof(float));
 	// perform the fft
-	fftw_execute(odf->p);
+	fftwf_execute(odf->p);
 }
 
 ////////////////////////////// Methods for Detection Functions /////////////////////////////////
 
-static double energyEnvelope(struct odf * odf){
-	double sum = 0;	
-	
+static float energyEnvelope(struct odf * odf){
 	// sum the squares of the samples
-	for (int i = 0;i < odf->frameSize;i++) {
-		sum = sum + (odf->frame[i]*odf->frame[i]);
-	}
-	
-	return sum;		// return sum
+  __m128 accum = _mm_setzero_ps();
+  for(int i = 0; i < odf->frameSize; i+=4)
+  {
+    __m128 these_4 = *(__m128 *)(odf->frame+i);
+    accum = _mm_add_ps(accum,_mm_mul_ps(these_4,these_4));
+  }
+  const __m128 accum1 = _mm_add_ps(accum,_mm_movehl_ps(accum,accum));
+  const __m128 accum2 = _mm_add_ss(accum1,_mm_shuffle_ps(accum1,accum1,1));
+	return accum2[0];		// return sum
 }
 static void genMagnitudeSpectrum(struct odf * odf ){
 	performFFT(odf);
-	for (int i = 0;i < (odf->frameSize/2)+1;i++) {
-		double thisSpec = hypot(odf->complexOut[i][0],odf->complexOut[i][1]);
-    odf->magSpec[i] = thisSpec;
-    odf->magSpec[odf->frameSize-1-i] = thisSpec;
-	}
-}
-static double energyDifference(struct odf * odf){
-	double sum = 0;
-	double sample;
-	
-	// sum the squares of the samples
-	for (int i = 0;i < odf->frameSize;i++) {
-		sum = sum + (odf->frame[i]*odf->frame[i]);
-	}
-	sample = sum - odf->prevEnergySum;	// sample is first order difference in energy
-  odf->prevEnergySum = sum;
-
-  return MIN(sample, 0);
-}
-
-static double spectralDifference(struct odf * odf){
-	double sum = 0;
-	
-	// perform the FFT
-  genMagnitudeSpectrum(odf);
-	
-	// compute first (N/2)+1 mag values
-	for (int i = 0;i < odf->frameSize;i++) {
-    sum += 2*(odf->prevMagSpec[i]-odf->magSpec[i]);
-    odf->prevMagSpec[i] = odf->magSpec[i];;
-	}
-	return sum;		
-}
-
-static double spectralDifferenceHWR(struct odf * odf) {
-	double sum = 0;
-
-	// perform the FFT
-  genMagnitudeSpectrum(odf);
-	
-	sum = 0;	// initialise sum to zero
-	for (int i = 0;i < odf->frameSize;i++) {
-    double diff = odf->magSpec[i]-odf->prevMagSpec[i];
-    sum += MAX(diff,0);
-    odf->prevMagSpec[i]=odf->magSpec[i];
+  for ( int i = 0; i < odf->frameSize; i+=4)
+  {
+    v4sf mag,phase;
+    *(__m128*)(odf->prevMagSpec+i)=*(__m128*)(odf->magSpec+i);
+    *(__m128*)(odf->prevPhase2+i)=*(__m128*)(odf->prevPhase+i);
+    *(__m128*)(odf->prevPhase+i)=*(__m128*)(odf->phase+i);
+    _approx_magphase_ps(&mag,&phase,*(__m128*)(odf->realOut+i),*(__m128*)(odf->imagOut+i));
+    *(__m128*)(odf->magSpec+i)=mag;
+    *(__m128*)(odf->phase+i)=phase;
   }
-	return sum;		
+}
+static float energyDifference(struct odf * odf){
+  __m128 sum = _mm_setzero_ps();	
+	// sum the squares of the samples
+	for (int i = 0;i < odf->frameSize;i+=4) {
+    __m128 these_4 = *(__m128*)(odf->frame+i);
+    sum = _mm_add_ps(sum,_mm_mul_ps(these_4,these_4));
+	}
+  const __m128 accum1 = _mm_add_ps(sum,_mm_movehl_ps(sum,sum));
+  const __m128 accum2 = _mm_add_ss(accum1,_mm_shuffle_ps(accum1,accum1,1));
+	
+
+	float sample = accum2[0] - odf->prevEnergySum;	// sample is first order difference in energy
+  odf->prevEnergySum = accum2[0];
+  return MAX(sample, 0);
 }
 
-static double phaseDeviation(struct odf * odf){
-	double dev;
-	double sum = 0;
+static float spectralDifference(struct odf * odf){
+	__m128 sum =_mm_setzero_ps();
+	// perform the FFT
+  genMagnitudeSpectrum(odf);
+	// compute first (N/2)+1 mag values
+	for (int i = 0;i < odf->frameSize;i+=4) {
+    __m128 these_4 = *(__m128 *)(odf->magSpec+i);
+    sum = _mm_add_ps(sum,_mm_abs_ps(_mm_sub_ps(*(__m128*)(odf->prevMagSpec+i),these_4)));
+    *(__m128 *)(odf->prevMagSpec+i) = these_4;
+	}
+  const __m128 accum1 = _mm_add_ps(sum,_mm_movehl_ps(sum,sum));
+  const __m128 accum2 = _mm_add_ss(accum1,_mm_shuffle_ps(accum1,accum1,1));
+	return accum2[0];		// return sum
+
+}
+
+static float spectralDifferenceHWR(struct odf * odf) {
+	__m128 sum = _mm_setzero_ps();
+
+	// perform the FFT
+  genMagnitudeSpectrum(odf);
+	for (int i = 0;i < odf->frameSize;i+=4) {
+    __m128 these_4 = *(__m128*)(odf->magSpec+i);
+    sum = _mm_add_ps(sum,_mm_max_ps(_mm_sub_ps(these_4,*(__m128*)(odf->prevMagSpec+i)),_mm_setzero_ps()));
+    *(__m128*)(odf->prevMagSpec+i)=these_4;
+  }
+	return sum[0];
+}
+
+static float phaseDeviation(struct odf * odf){
+	__m128 sum = _mm_setzero_ps();
 	
 	// perform the FFT
   genMagnitudeSpectrum(odf);	
 	// compute phase values from fft output and sum deviations
 	for (int i = 0;i < odf->frameSize;i++) {
 		// calculate phase value
-		odf->phase[i] = atan2(odf->complexOut[i][1],odf->complexOut[i][0]);
 		
-		// if bin is not just a low energy bin then examine phase deviation
-		if (odf->magSpec[i] > 0.1) {
-			dev = odf->phase[i] - (2*odf->prevPhase[i]) + odf->prevPhase2[i];	// phase deviation
-			sum += fabs(princarg(dev));	// wrap into [-pi,pi] range
-		}
-				
-		// store values for next calculation
-		odf->prevPhase2[i] = odf->prevPhase[i];
-		odf->prevPhase[i] = odf->phase[i];
-	}
-	
-	return sum;		
+    __m128 mag_diff = _mm_sub_ps(*(__m128*)(odf->magSpec+i),*(__m128*)(odf->prevMagSpec+i));
+    __m128 mask = _mm_cmpgt_ps(mag_diff,_mm_set1_ps(0.1));
+      __m128 dev = 
+      _mm_sub_ps(_mm_add_ps(*(__m128*)(odf->phase+i),*(__m128*)(odf->prevPhase2+i)),
+      _mm_add_ps(*(__m128*)(odf->prevPhase+i),*(__m128*)(odf->prevPhase+i)));
+		// wrap into [-pi,pi] range
+		__m128 pdev = princarg_ps(dev);	
+    sum = _mm_add_ps(sum,_mm_abs_ps(_mm_and_ps(mask,pdev)));
+  }
+  const __m128 accum1 = _mm_add_ps(sum,_mm_movehl_ps(sum,sum));
+  const __m128 accum2 = _mm_add_ss(accum1,_mm_shuffle_ps(accum1,accum1,1));
+	return accum2[0];		// return sum
+
 }
 
-double complexSpectralDifference(struct odf * odf){
-	double dev,pdev;
-	double sum = 0;
-	double mag_diff,phase_diff;
-	double value;
-	
+float complexSpectralDifference(struct odf * odf){
+	__m128 sum = _mm_setzero_ps();
 	// perform the FFT
 	genMagnitudeSpectrum(odf);
 	
 	// compute phase values from fft output and sum deviations
 	for (int i = 0;i < odf->frameSize;i++) {
 		// calculate phase value
-		odf->phase[i] = atan2(odf->complexOut[i][1],odf->complexOut[i][0]);
-		
 				// phase deviation
-		dev = odf->phase[i] - (2*odf->prevPhase[i]) + odf->prevPhase2[i];
-		
+		 __m128 dev = 
+      _mm_sub_ps(_mm_add_ps(*(__m128*)(odf->phase+i),*(__m128*)(odf->prevPhase2+i)),
+      _mm_add_ps(*(__m128*)(odf->prevPhase+i),*(__m128*)(odf->prevPhase+i)));
 		// wrap into [-pi,pi] range
-		pdev = princarg(dev);	
-		
-		// calculate magnitude difference (real part of Euclidean distance between complex frames)
-		mag_diff = odf->magSpec[i] - odf->prevMagSpec[i];
-		
-		// calculate phase difference (imaginary part of Euclidean distance between complex frames)
-		phase_diff = -odf->magSpec[i]*sin(pdev);
-		
-		// square real and imaginary parts, sum and take square root
-		sum += value = hypot(mag_diff,phase_diff);
-	
-		// store values for next calculation
-		odf->prevPhase2[i] = odf->prevPhase[i];
-		odf->prevPhase[i] = odf->phase[i];
-		odf->prevMagSpec[i] = odf->magSpec[i];
-	}
-	
-	return sum;		
-}
-
-double complexSpectralDifferenceHWR(struct odf * odf) {
-	double dev,pdev;
-	double sum = 0;
-	double mag_diff,phase_diff;
-	
-	genMagnitudeSpectrum(odf);
-	
-	// compute phase values from fft output and sum deviations
-	for (int i = 0;i < odf->frameSize;i++) {
-		// calculate phase value
-		odf->phase[i] = atan2(odf->complexOut[i][1],odf->complexOut[i][0]);
-		
-		// phase deviation
-		dev = odf->phase[i] - (2*odf->prevPhase[i]) + odf->prevPhase2[i];
-		
-		// wrap into [-pi,pi] range
-		pdev = princarg(dev);	
-		
-		// calculate magnitude difference (real part of Euclidean distance between complex frames)
-		mag_diff = odf->magSpec[i] - odf->prevMagSpec[i];
+		__m128 pdev = princarg_ps(dev);	
+    __m128 mag_diff = _mm_sub_ps(*(__m128*)(odf->magSpec+i),*(__m128*)(odf->prevMagSpec+i));
 		
 		// if we have a positive change in magnitude, then include in sum, otherwise ignore (half-wave rectification)
-		if (mag_diff > 0) {
-			// calculate phase difference (imaginary part of Euclidean distance between complex frames)
-			phase_diff = -odf->magSpec[i]*sin(pdev);
-
-			// square real and imaginary parts, sum and take square root
-			sum += hypot(mag_diff,phase_diff);
+//    __m128 mag_diff_mask = _mm_cmpgt_ps(mag_diff,_mm_setzero_ps());
+    __m128 phase_diff = _mm_mul_ps(*(__m128*)(odf->magSpec+i),sin_ps(pdev));
 		
-		}
+		// square real and imaginary parts, sum and take square root
+		sum =_mm_add_ps(sum, _mm_hypot_ps(mag_diff,phase_diff));
+	
+		// store values for next calculation
+	}
+	
+	const __m128 accum1 = _mm_add_ps(sum,_mm_movehl_ps(sum,sum));
+  const __m128 accum2 = _mm_add_ss(accum1,_mm_shuffle_ps(accum1,accum1,1));
+	return accum2[0];		// return sum
+}
+
+float complexSpectralDifferenceHWR(struct odf * odf) {
+	__m128 sum = _mm_setzero_ps();
+	genMagnitudeSpectrum(odf);
+	
+	// compute phase values from fft output and sum deviations
+	for (int i = 0;i < odf->frameSize;i+=4) {
+    __m128 dev = 
+      _mm_sub_ps(_mm_add_ps(*(__m128*)(odf->phase+i),*(__m128*)(odf->prevPhase2+i)),
+      _mm_add_ps(*(__m128*)(odf->prevPhase+i),*(__m128*)(odf->prevPhase+i)));
+		// wrap into [-pi,pi] range
+		__m128 pdev = princarg_ps(dev);	
+		
+		// calculate magnitude difference (real part of Euclidean distance between complex frames)
+		__m128 mag_diff = _mm_sub_ps(*(__m128*)(odf->magSpec+i),*(__m128*)(odf->prevMagSpec+i));
+		
+		// if we have a positive change in magnitude, then include in sum, otherwise ignore (half-wave rectification)
+    __m128 mag_diff_mask = _mm_cmpgt_ps(mag_diff,_mm_setzero_ps());
+    __m128 phase_diff = _mm_mul_ps(*(__m128*)(odf->magSpec+i),
+        sin_ps(pdev));
+    __m128 _hypot = _mm_hypot_ps(mag_diff,phase_diff);
+    sum = _mm_add_ps(sum,_mm_and_ps(mag_diff_mask,_hypot));
 		
 		// store values for next calculation
 		odf->prevPhase2[i] = odf->prevPhase[i];
 		odf->prevPhase[i] = odf->phase[i];
 		odf->prevMagSpec[i] = odf->magSpec[i];
 	}
-	
-	return sum;		
+	  const __m128 accum1 = _mm_add_ps(sum,_mm_movehl_ps(sum,sum));
+  const __m128 accum2 = _mm_add_ss(accum1,_mm_shuffle_ps(accum1,accum1,1));
+	return accum2[0];		// return sum
 }
 
-double highFrequencyContent(struct odf * odf) {
-	double sum = 0;
-	
+float highFrequencyContent(struct odf * odf) {
+	// perform the FFT
+	genMagnitudeSpectrum(odf);
+	__m128 sum = _mm_setzero_ps();
+  __m128 counter = _mm_set_ps(1,2,3,4);
+  const __m128 count = _mm_set1_ps(1);
+	// compute phase values from fft output and sum deviations
+	for (int i = 0;i < odf->frameSize;i++) {		
+		sum = _mm_add_ps(sum,_mm_mul_ps(counter,*(__m128*)(odf->magSpec+i)));
+    counter = _mm_add_ps(counter,count);
+	}
+	const __m128 accum1 = _mm_add_ps(sum,_mm_movehl_ps(sum,sum));
+  const __m128 accum2 = _mm_add_ss(accum1,_mm_shuffle_ps(accum1,accum1,1));
+	return accum2[0];		// return sum
+}
+
+static float highFrequencySpectralDifference(struct odf * odf) {
+	// perform the FFT
+	genMagnitudeSpectrum(odf);
+
+  __m128 sum = _mm_setzero_ps();
+  __m128 counter = _mm_set_ps(1,2,3,4);
+  const __m128 count = _mm_set1_ps(1);
+	// compute phase values from fft output and sum deviations
+	for (int i = 0;i < odf->frameSize;i++) {		
+    __m128 diff = _mm_abs_ps(_mm_sub_ps(*(__m128*)(odf->magSpec+i),
+          *(__m128*)(odf->prevMagSpec+i)));
+		sum = _mm_add_ps(sum,_mm_mul_ps(counter,diff));
+    counter = _mm_add_ps(counter,count);
+	}
+	const __m128 accum1 = _mm_add_ps(sum,_mm_movehl_ps(sum,sum));
+  const __m128 accum2 = _mm_add_ss(accum1,_mm_shuffle_ps(accum1,accum1,1));
+	return accum2[0];		// return sum
+}
+
+static float highFrequencySpectralDifferenceHWR(struct odf * odf) {
 	// perform the FFT
 	genMagnitudeSpectrum(odf);
 	
+  __m128 sum = _mm_setzero_ps();
+  __m128 counter = _mm_set_ps(1,2,3,4);
+  const __m128 count = _mm_set1_ps(1);
 	// compute phase values from fft output and sum deviations
 	for (int i = 0;i < odf->frameSize;i++) {		
-		
-		sum = sum + (odf->magSpec[i]*((double) (i+1)));
-		
-		// store values for next calculation
-		odf->prevMagSpec[i] = odf->magSpec[i];
+    __m128 diff = _mm_max_ps(_mm_sub_ps(*(__m128*)(odf->magSpec+i),
+          *(__m128*)(odf->prevMagSpec+i)),_mm_setzero_ps());
+		sum = _mm_add_ps(sum,_mm_mul_ps(counter,diff));
+    counter = _mm_add_ps(counter,count);
 	}
-	
-	return sum;		
-}
-
-static double highFrequencySpectralDifference(struct odf * odf) {
-	double sum = 0;
-	
-	// perform the FFT
-	genMagnitudeSpectrum(odf);
-	
-	// compute phase values from fft output and sum deviations
-	for (int i = 0;i < odf->frameSize;i++) {		
-		// calculate difference
-		sum += (i+1)*fabs(odf->magSpec[i] - odf->prevMagSpec[i]);
-		
-		// store values for next calculation
-		odf->prevMagSpec[i] = odf->magSpec[i];
-	}
-	
-	return sum;		
-}
-
-static double highFrequencySpectralDifferenceHWR(struct odf * odf) {
-	double sum = 0;
-	
-	// perform the FFT
-	genMagnitudeSpectrum(odf);
-	
-	// compute phase values from fft output and sum deviations
-	for (int i = 0;i < odf->frameSize;i++) {		
-		// calculate difference
-		sum += (i+1)*MAX(odf->magSpec[i] - odf->prevMagSpec[i],0);
-		
-		// store values for next calculation
-		odf->prevMagSpec[i] = odf->magSpec[i];
-	}
-	
-	return sum;		
+	const __m128 accum1 = _mm_add_ps(sum,_mm_movehl_ps(sum,sum));
+  const __m128 accum2 = _mm_add_ss(accum1,_mm_shuffle_ps(accum1,accum1,1));
+	return accum2[0];		// return sum
 }
 
 ////////////////////////////// Methods to Calculate Windows ////////////////////////////////////
 
-static void calculateHanningWindow(double * window, int frameSize){
-	double N = (double) (frameSize-1);	// framesize minus 1
+static void calculateHanningWindow(float * window, int frameSize){
+	float N = (float) (frameSize-1);	// framesize minus 1
 	
 	// Hanning window calculation
 	for (int n = 0;n < frameSize;n++) {
@@ -422,9 +420,9 @@ static void calculateHanningWindow(double * window, int frameSize){
 	}
 }
 
-static void calclulateHammingWindow(double * window, int frameSize) {
-	double N = (double) (frameSize-1);	// framesize minus 1
-	double n_val = 0;// double version of index 'n'
+static void calclulateHammingWindow(float * window, int frameSize) {
+	float N = (float) (frameSize-1);	// framesize minus 1
+	float n_val = 0;// float version of index 'n'
 	
 	// Hamming window calculation
 	for (int n = 0;n < frameSize;n++) {
@@ -433,9 +431,9 @@ static void calclulateHammingWindow(double * window, int frameSize) {
 	}
 }
 
-static void calculateBlackmanWindow(double * window, int frameSize) {
-	double N = (double) (frameSize-1);	// framesize minus 1
-	double n_val = 0;	// double version of index 'n'
+static void calculateBlackmanWindow(float * window, int frameSize) {
+	float N = (float) (frameSize-1);	// framesize minus 1
+	float n_val = 0;	// float version of index 'n'
 	
 	// Blackman window calculation
 	for (int n = 0;n < frameSize;n++) {
@@ -444,10 +442,10 @@ static void calculateBlackmanWindow(double * window, int frameSize) {
 	}
 }
 
-static void calculateTukeyWindow(double * window, int frameSize) {
-	double alpha = 0.5;	// alpha [default value = 0.5];
-	double N = (double) (frameSize-1);	// framesize minus 1
-	double n_val = (double) (-1*((frameSize/2)))+1;
+static void calculateTukeyWindow(float * window, int frameSize) {
+	float alpha = 0.5;	// alpha [default value = 0.5];
+	float N = (float) (frameSize-1);	// framesize minus 1
+	float n_val = (float) (-1*((frameSize/2)))+1;
 		
 	// Tukey window calculation
     // left taper
@@ -464,7 +462,7 @@ static void calculateTukeyWindow(double * window, int frameSize) {
 	}
 }
 
-static void calculateRectangularWindow(double * window, int frameSize) {
+static void calculateRectangularWindow(float * window, int frameSize) {
 	for (int n = 0;n < frameSize;n++) {
 		window[n] = 1.0;
 	}
@@ -473,7 +471,22 @@ static void calculateRectangularWindow(double * window, int frameSize) {
 
 ///////////////////////////////// Other Handy Methods //////////////////////////////////////////
 
-static inline double princarg(double phaseVal) {	
+_PS_CONST(cephes_2PI,2*M_PI);
+_PS_CONST(cephes_minus_2PI,-2*M_PI);
+static __m128 princarg_ps(__m128 phaseVal) {	
 	// if phase value is less than or equal to -pi then add 2*pi
-  return phaseVal - (2*M_PI)*floor(phaseVal/(2*M_PI));
+  __m128 less_than_minus_pi_mask = _mm_cmplt_ps(
+      phaseVal,
+      *(const __m128*)_ps_cephes_minus_PI);
+  __m128 greater_than_pi_mask = _mm_cmpgt_ps(
+      phaseVal,
+      *(const __m128*)_ps_cephes_PI);
+  __m128 addend = _mm_or_ps(
+              _mm_and_ps(
+                greater_than_pi_mask,
+                *(const __m128*)_ps_cephes_minus_2PI),
+              _mm_and_ps(
+                less_than_minus_pi_mask,
+                *(const __m128*)_ps_cephes_2PI));
+  return _mm_add_ps(phaseVal,addend);
 }

@@ -22,10 +22,11 @@
 
 #ifndef __ONSETDETECTIONFUNCTION_H
 #define __ONSETDETECTIONFUNCTION_H
-#include <math.h>
+#include "sse_mathfun.h"
 #include <string.h>
 #include "common.h"
 #include <fftw3.h>
+#include <math.h>
 
 //=======================================================================
 /** The type of onset detection function to calculate */
@@ -62,23 +63,25 @@ struct odf {
 	enum OnsetDetectionFunctionType type;		/**< type of detection function */
     enum WindowType windowType;                     /**< type of window used in calculations */
 	
-	fftw_plan p;						/**< fftw plan */
-	fftw_complex *complexIn;			/**< to hold complex fft values for input */
-	fftw_complex *complexOut;			/**< to hold complex fft values for output */
-	
+	fftwf_plan p;						/**< fftw plan */
+	float  *realIn;			/**< to hold complex fft values for input */
+	float  *imagIn;			/**< to hold complex fft values for input */
+  float  *realOut;			/**< to hold complex fft values for input */
+	float  *imagOut;			/**< to hold complex fft values for input */
+
 	int initialised;					/**< flag indicating whether buffers and FFT plans are initialised */
 
-    double * frame;                     /**< audio frame */
-    double * window;                    /**< window */
+    float * frame;                     /**< audio frame */
+    float * window;                    /**< window */
 	
-	double prevEnergySum;				/**< to hold the previous energy sum value */
+	float prevEnergySum;				/**< to hold the previous energy sum value */
 	
-    double * magSpec;                   /**< magnitude spectrum */
-    double * prevMagSpec;               /**< previous magnitude spectrum */
+    float * magSpec;                   /**< magnitude spectrum */
+    float * prevMagSpec;               /**< previous magnitude spectrum */
 	
-    double * phase;                     /**< FFT phase values */
-    double * prevPhase;                 /**< previous phase values */
-    double * prevPhase2;                 /**< second order previous phase values */
+    float * phase;                     /**< FFT phase values */
+    float * prevPhase;                 /**< previous phase values */
+    float * prevPhase2;                 /**< second order previous phase values */
 
 };
 
@@ -91,7 +94,7 @@ struct odf {
 int odf_init(struct odf * odf, int hop_size, int frame_size, enum OnsetDetectionFunctionType odf_type, enum WindowType window_type);
 void odf_del(struct odf * odf);
 
-double odf_calculate_sample(struct odf * odf, double * buffer);
+float odf_calculate_sample(struct odf * odf, float * buffer);
 void odf_set_type(struct odf * odf, enum OnsetDetectionFunctionType type);
 
 #endif

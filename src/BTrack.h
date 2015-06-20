@@ -36,33 +36,33 @@
 struct btrack {
     struct odf odf;
     int frameSize;
-    double * onsetDF;                       /**< to hold onset detection function */
-    double * cumulativeScore;               /**< to hold cumulative score */
-    double * w1;
+    float * onsetDF;                       /**< to hold onset detection function */
+    float * cumulativeScore;               /**< to hold cumulative score */
+    float * w1;
 
-    double resampledOnsetDF[512];           /**< to hold resampled detection function */
-    double acf[512];                        /**<  to hold autocorrelation function */
-    double weightingVector[128];            /**<  to hold weighting vector */
-    double combFilterBankOutput[128];       /**<  to hold comb filter output */
-    double tempoObservationVector[41];      /**<  to hold tempo version of comb filter output */
+    float resampledOnsetDF[512];           /**< to hold resampled detection function */
+    float acf[512];                        /**<  to hold autocorrelation function */
+    float weightingVector[128];            /**<  to hold weighting vector */
+    float combFilterBankOutput[128];       /**<  to hold comb filter output */
+    float tempoObservationVector[41];      /**<  to hold tempo version of comb filter output */
 	
-    double delta[41];                       /**<  to hold final tempo candidate array */
-    double prevDelta[41];                   /**<  previous delta */
-    double prevDeltaFixed[41];              /**<  fixed tempo version of previous delta */
+    float delta[41];                       /**<  to hold final tempo candidate array */
+    float prevDelta[41];                   /**<  previous delta */
+    float prevDeltaFixed[41];              /**<  fixed tempo version of previous delta */
 	
-    double tempoTransitionMatrix[41][41];   /**<  tempo transition matrix */
+    float tempoTransitionMatrix[41][41];   /**<  tempo transition matrix */
     
 	//=======================================================================
     // parameters
     
-    double tightness;                       /**< the tightness of the weighting used to calculate cumulative score */
-    double alpha;                           /**< the mix between the current detection function sample and the cumulative score's "momentum" */
-    double beatPeriod;                      /**< the beat period, in detection function samples */
-    double tempo;                           /**< the tempo in beats per minute */
-    double estimatedTempo;                  /**< the current tempo estimation being used by the algorithm */
-    double latestCumulativeScoreValue;      /**< holds the latest value of the cumulative score function */
-    double latestODF;                       /**< holds the latest value of the onset detection function*/
-    double tempoToLagFactor;                /**< factor for converting between lag and tempo */
+    float tightness;                       /**< the tightness of the weighting used to calculate cumulative score */
+    float alpha;                           /**< the mix between the current detection function sample and the cumulative score's "momentum" */
+    float beatPeriod;                      /**< the beat period, in detection function samples */
+    float tempo;                           /**< the tempo in beats per minute */
+    float estimatedTempo;                  /**< the current tempo estimation being used by the algorithm */
+    float latestCumulativeScoreValue;      /**< holds the latest value of the cumulative score function */
+    float latestODF;                       /**< holds the latest value of the onset detection function*/
+    float tempoToLagFactor;                /**< factor for converting between lag and tempo */
     int m0;                                 /**< indicates when the next point to predict the next beat is */
     int beatCounter;                        /**< keeps track of when the next beat is - will be zero when the beat is due, and is set elsewhere in the algorithm to be positive once a beat prediction is made */
     int hopSize;                            /**< the hop size being used by the algorithm */
@@ -79,16 +79,16 @@ struct btrack {
 int btrack_init(struct btrack * bt, int hop_size, int frame_size);
 void btrack_del(struct btrack * bt);
 
-void btrack_process_audio_frame(struct btrack * bt, double * frame);
-void btrack_process_odf_sample(struct btrack * bt, double odf_sample);
+void btrack_process_audio_frame(struct btrack * bt, float * frame);
+void btrack_process_odf_sample(struct btrack * bt, float odf_sample);
 
 int btrack_beat_due_in_current_frame(struct btrack * bt);
-double btrack_get_bpm(struct btrack * bt);
-double btrack_get_latest_score(struct btrack * bt);
-double btrack_get_latest_odf(struct btrack * bt);
+float btrack_get_bpm(struct btrack * bt);
+float btrack_get_latest_score(struct btrack * bt);
+float btrack_get_latest_odf(struct btrack * bt);
 
-void btrack_set_bpm(struct btrack * bt, double bpm);
-void btrack_fix_bpm(struct btrack * bt, double bpm);
+void btrack_set_bpm(struct btrack * bt, float bpm);
+void btrack_fix_bpm(struct btrack * bt, float bpm);
 void btrack_nofix_bpm(struct btrack * bt);
 
 void btrack_set_hop_size(struct btrack * bt, int hop_size);
