@@ -19,7 +19,10 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 //=======================================================================
-
+#define _ISOC11_SOURCE
+#define _GNU_SOURCE
+#define _XOPEN_SOURCE
+#include <math.h>
 #include "OnsetDetectionFunction.h"
 #include "common.h"
 
@@ -118,18 +121,11 @@ void odf_set_type(struct odf * odf, enum OnsetDetectionFunctionType type){
 
 double odf_calculate_sample(struct odf * odf, double * buffer){
 	double odfSample;
-		
-	// shift audio samples back in frame by hop size
-	for (int i = 0; i < (odf->frameSize-odf->hopSize);i++) {
-		odf->frame[i] = odf->frame[i+odf->hopSize];
-	}
+	
+  memmove(odf->frame,odf->frame+odf->hopSize,(odf->frameSize-odf->hopSize)*sizeof(odf->frame[0]));
 	
 	// add new samples to frame from input buffer
-	int j = 0;
-	for (int i = (odf->frameSize-odf->hopSize);i < odf->frameSize;i++) {
-		odf->frame[i] = buffer[j];
-		j++;
-	}
+  memmove(odf->frame + (odf->frameSize-odf->hopSize),buffer,odf->hopSize*sizeof(buffer[0]));
 		
 	switch (odf->type){
 		case EnergyEnvelope:
@@ -207,7 +203,14 @@ static double energyEnvelope(struct odf * odf){
 	
 	return sum;		// return sum
 }
-
+static void genMagnitudeSpectrum(struct odf * odf ){
+	performFFT(odf);
+	for (int i = 0;i < (odf->frameSize/2)+1;i++) {
+		double thisSpec = hypot(odf->complexOut[i][0],odf->complexOut[i][1]);
+    odf->magSpec[i] = thisSpec;
+    odf->magSpec[odf->frameSize-1-i] = thisSpec;
+	}
+}
 static double energyDifference(struct odf * odf){
 	double sum = 0;
 	double sample;
@@ -217,109 +220,55 @@ static double energyDifference(struct odf * odf){
 		sum = sum + (odf->frame[i]*odf->frame[i]);
 	}
 	sample = sum - odf->prevEnergySum;	// sample is first order difference in energy
-    odf->prevEnergySum = sum;
-	
-    return MIN(sample, 0);
+  odf->prevEnergySum = sum;
+
+  return MIN(sample, 0);
 }
 
 static double spectralDifference(struct odf * odf){
-	double diff;
-	double sum;
+	double sum = 0;
 	
 	// perform the FFT
-	performFFT(odf);
+  genMagnitudeSpectrum(odf);
 	
 	// compute first (N/2)+1 mag values
-	for (int i = 0;i < (odf->frameSize/2)+1;i++) {
-		odf->magSpec[i] = sqrt(pow(odf->complexOut[i][0],2) + pow(odf->complexOut[i][1],2));
-	}
-	// mag spec symmetric above (N/2)+1 so copy previous values
-	for (int i = (odf->frameSize/2)+1;i < odf->frameSize;i++) {
-		odf->magSpec[i] = odf->magSpec[odf->frameSize-i];
-	}
-	
-	sum = 0;	// initialise sum to zero
 	for (int i = 0;i < odf->frameSize;i++) {
-		// calculate difference
-		diff = odf->magSpec[i] - odf->prevMagSpec[i];
-		
-		// ensure all difference values are positive
-		if (diff < 0) {
-			diff = diff*-1;
-		}
-		
-		// add difference to sum
-		sum = sum+diff;
-		
-		// store magnitude spectrum bin for next detection function sample calculation
-		odf->prevMagSpec[i] = odf->magSpec[i];
+    sum += 2*(odf->prevMagSpec[i]-odf->magSpec[i]);
+    odf->prevMagSpec[i] = odf->magSpec[i];;
 	}
-	
 	return sum;		
 }
 
 static double spectralDifferenceHWR(struct odf * odf) {
-	double diff;
-	double sum;
+	double sum = 0;
 
 	// perform the FFT
-	performFFT(odf);
-	
-	// compute first (N/2)+1 mag values
-	for (int i = 0;i < (odf->frameSize/2)+1;i++) {
-		odf->magSpec[i] = sqrt(pow(odf->complexOut[i][0],2) + pow(odf->complexOut[i][1],2));
-	}
-	// mag spec symmetric above (N/2)+1 so copy previous values
-	for (int i = (odf->frameSize/2)+1;i < odf->frameSize;i++) {
-		odf->magSpec[i] = odf->magSpec[odf->frameSize-i];
-	}
+  genMagnitudeSpectrum(odf);
 	
 	sum = 0;	// initialise sum to zero
 	for (int i = 0;i < odf->frameSize;i++) {
-		// calculate difference
-		diff = odf->magSpec[i] - odf->prevMagSpec[i];
-		
-		// only add up positive differences
-		if (diff > 0)
-		{
-			// add difference to sum
-			sum = sum+diff;
-		}
-		
-		// store magnitude spectrum bin for next detection function sample calculation
-		odf->prevMagSpec[i] = odf->magSpec[i];
-	}
-	
+    double diff = odf->magSpec[i]-odf->prevMagSpec[i];
+    sum += MAX(diff,0);
+    odf->prevMagSpec[i]=odf->magSpec[i];
+  }
 	return sum;		
 }
 
 static double phaseDeviation(struct odf * odf){
 	double dev;
-    double pdev;
 	double sum = 0;
 	
 	// perform the FFT
-	performFFT(odf);
-	
+  genMagnitudeSpectrum(odf);	
 	// compute phase values from fft output and sum deviations
 	for (int i = 0;i < odf->frameSize;i++) {
 		// calculate phase value
 		odf->phase[i] = atan2(odf->complexOut[i][1],odf->complexOut[i][0]);
-		// calculate magnitude value
-		odf->magSpec[i] = sqrt(pow(odf->complexOut[i][0],2) + pow(odf->complexOut[i][1],2));
 		
 		// if bin is not just a low energy bin then examine phase deviation
 		if (odf->magSpec[i] > 0.1) {
 			dev = odf->phase[i] - (2*odf->prevPhase[i]) + odf->prevPhase2[i];	// phase deviation
-			pdev = princarg(dev);	// wrap into [-pi,pi] range
-		
-			// make all values positive
-			if (pdev < 0){
-				pdev = pdev*-1;
-			}
-						
-			// add to sum
-			sum = sum + pdev;
+			sum += fabs(princarg(dev));	// wrap into [-pi,pi] range
 		}
 				
 		// store values for next calculation
@@ -337,17 +286,14 @@ double complexSpectralDifference(struct odf * odf){
 	double value;
 	
 	// perform the FFT
-	performFFT(odf);
+	genMagnitudeSpectrum(odf);
 	
 	// compute phase values from fft output and sum deviations
 	for (int i = 0;i < odf->frameSize;i++) {
 		// calculate phase value
 		odf->phase[i] = atan2(odf->complexOut[i][1],odf->complexOut[i][0]);
 		
-		// calculate magnitude value
-		odf->magSpec[i] = sqrt(pow(odf->complexOut[i][0],2) + pow(odf->complexOut[i][1],2));
-		
-		// phase deviation
+				// phase deviation
 		dev = odf->phase[i] - (2*odf->prevPhase[i]) + odf->prevPhase2[i];
 		
 		// wrap into [-pi,pi] range
@@ -360,11 +306,8 @@ double complexSpectralDifference(struct odf * odf){
 		phase_diff = -odf->magSpec[i]*sin(pdev);
 		
 		// square real and imaginary parts, sum and take square root
-		value = sqrt(pow(mag_diff,2) + pow(phase_diff,2));
+		sum += value = hypot(mag_diff,phase_diff);
 	
-		// add to sum
-		sum = sum + value;
-		
 		// store values for next calculation
 		odf->prevPhase2[i] = odf->prevPhase[i];
 		odf->prevPhase[i] = odf->phase[i];
@@ -378,24 +321,19 @@ double complexSpectralDifferenceHWR(struct odf * odf) {
 	double dev,pdev;
 	double sum = 0;
 	double mag_diff,phase_diff;
-	double value;
 	
-	// perform the FFT
-	performFFT(odf);
+	genMagnitudeSpectrum(odf);
 	
 	// compute phase values from fft output and sum deviations
 	for (int i = 0;i < odf->frameSize;i++) {
 		// calculate phase value
 		odf->phase[i] = atan2(odf->complexOut[i][1],odf->complexOut[i][0]);
-		// calculate magnitude value
-		odf->magSpec[i] = sqrt(pow(odf->complexOut[i][0],2) + pow(odf->complexOut[i][1],2));
 		
 		// phase deviation
 		dev = odf->phase[i] - (2*odf->prevPhase[i]) + odf->prevPhase2[i];
 		
 		// wrap into [-pi,pi] range
 		pdev = princarg(dev);	
-		
 		
 		// calculate magnitude difference (real part of Euclidean distance between complex frames)
 		mag_diff = odf->magSpec[i] - odf->prevMagSpec[i];
@@ -406,10 +344,8 @@ double complexSpectralDifferenceHWR(struct odf * odf) {
 			phase_diff = -odf->magSpec[i]*sin(pdev);
 
 			// square real and imaginary parts, sum and take square root
-			value = sqrt(pow(mag_diff,2) + pow(phase_diff,2));
+			sum += hypot(mag_diff,phase_diff);
 		
-			// add to sum
-			sum = sum + value;
 		}
 		
 		// store values for next calculation
@@ -425,12 +361,10 @@ double highFrequencyContent(struct odf * odf) {
 	double sum = 0;
 	
 	// perform the FFT
-	performFFT(odf);
+	genMagnitudeSpectrum(odf);
 	
 	// compute phase values from fft output and sum deviations
 	for (int i = 0;i < odf->frameSize;i++) {		
-		// calculate magnitude value
-		odf->magSpec[i] = sqrt(pow(odf->complexOut[i][0],2) + pow(odf->complexOut[i][1],2));
 		
 		sum = sum + (odf->magSpec[i]*((double) (i+1)));
 		
@@ -443,24 +377,14 @@ double highFrequencyContent(struct odf * odf) {
 
 static double highFrequencySpectralDifference(struct odf * odf) {
 	double sum = 0;
-	double mag_diff;
 	
 	// perform the FFT
-	performFFT(odf);
+	genMagnitudeSpectrum(odf);
 	
 	// compute phase values from fft output and sum deviations
 	for (int i = 0;i < odf->frameSize;i++) {		
-		// calculate magnitude value
-		odf->magSpec[i] = sqrt(pow(odf->complexOut[i][0],2) + pow(odf->complexOut[i][1],2));
-		
 		// calculate difference
-		mag_diff = odf->magSpec[i] - odf->prevMagSpec[i];
-		
-		if (mag_diff < 0) {
-			mag_diff = -mag_diff;
-		}
-		
-		sum = sum + (mag_diff*((double) (i+1)));
+		sum += (i+1)*fabs(odf->magSpec[i] - odf->prevMagSpec[i]);
 		
 		// store values for next calculation
 		odf->prevMagSpec[i] = odf->magSpec[i];
@@ -471,22 +395,14 @@ static double highFrequencySpectralDifference(struct odf * odf) {
 
 static double highFrequencySpectralDifferenceHWR(struct odf * odf) {
 	double sum = 0;
-	double mag_diff;
 	
 	// perform the FFT
-	performFFT(odf);
+	genMagnitudeSpectrum(odf);
 	
 	// compute phase values from fft output and sum deviations
 	for (int i = 0;i < odf->frameSize;i++) {		
-		// calculate magnitude value
-		odf->magSpec[i] = sqrt(pow(odf->complexOut[i][0],2) + pow(odf->complexOut[i][1],2));
-		
 		// calculate difference
-		mag_diff = odf->magSpec[i] - odf->prevMagSpec[i];
-		
-		if (mag_diff > 0) {
-            sum = sum + (mag_diff*((double) (i+1)));
-		}
+		sum += (i+1)*MAX(odf->magSpec[i] - odf->prevMagSpec[i],0);
 		
 		// store values for next calculation
 		odf->prevMagSpec[i] = odf->magSpec[i];
@@ -557,29 +473,7 @@ static void calculateRectangularWindow(double * window, int frameSize) {
 
 ///////////////////////////////// Other Handy Methods //////////////////////////////////////////
 
-static double princarg(double phaseVal) {	
+static inline double princarg(double phaseVal) {	
 	// if phase value is less than or equal to -pi then add 2*pi
-	while (phaseVal <= (-M_PI)) {
-		phaseVal = phaseVal + (2*M_PI);
-	}
-	
-	// if phase value is larger than pi, then subtract 2*pi
-	while (phaseVal > M_PI) {
-		phaseVal = phaseVal - (2*M_PI);
-	}
-			
-	return phaseVal;
+  return phaseVal - (2*M_PI)*floor(phaseVal/(2*M_PI));
 }
-
-
-
-
-
-
-
-
-
-
-
-
-

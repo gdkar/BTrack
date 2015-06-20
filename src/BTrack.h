@@ -22,7 +22,9 @@
 
 #ifndef __BTRACK_H
 #define __BTRACK_H
-
+#ifndef _ISOC11_SOURCE
+#define _ISOC11_SOURCE
+#endif
 #include "OnsetDetectionFunction.h"
 
 //=======================================================================

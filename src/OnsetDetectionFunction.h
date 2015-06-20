@@ -22,8 +22,10 @@
 
 #ifndef __ONSETDETECTIONFUNCTION_H
 #define __ONSETDETECTIONFUNCTION_H
-
-#include "fftw3.h"
+#include <math.h>
+#include <string.h>
+#include "common.h"
+#include <fftw3.h>
 
 //=======================================================================
 /** The type of onset detection function to calculate */

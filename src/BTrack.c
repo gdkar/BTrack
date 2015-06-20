@@ -19,10 +19,16 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 //=======================================================================
-
+#ifndef _ISOC11_SOURCE
+#define _ISOC11_SOURCE
+#endif
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE
+#endif
+#include <math.h>
+#include "common.h"
 #include "BTrack.h"
 #include "samplerate.h"
-#include "common.h"
 
 
 static void resampleOnsetDetectionFunction(struct btrack * bt);
@@ -44,14 +50,13 @@ int btrack_init(struct btrack * bt, int hop_size, int frame_size){
     ASSERT(!rc);
 
     double rayparam = 43;
-	double pi = M_PI;
 	
-	// initialise parameters
-	bt->tightness = 5;
-	bt->alpha = 0.9;
-	bt->tempo = 120;
-	bt->estimatedTempo = 120.0;
-	bt->tempoToLagFactor = 60.*44100./512.;
+    // initialise parameters
+    bt->tightness = 5;
+    bt->alpha = 0.9;
+    bt->tempo = 120;
+    bt->estimatedTempo = 120.0;
+    bt->tempoToLagFactor = 60.*44100./512.;
 	
 	bt->m0 = 10;
 	bt->beatCounter = -1;
@@ -60,7 +65,7 @@ int btrack_init(struct btrack * bt, int hop_size, int frame_size){
 
 	// create rayleigh weighting vector
 	for (int n = 0;n < 128;n++) {
-		bt->weightingVector[n] = ((double) n / pow(rayparam,2)) * exp((-1*pow((double)-n,2)) / (2*pow(rayparam,2)));
+		bt->weightingVector[n] = ((double) n / SQR(rayparam)) * exp((-1*SQR((double)-n)) / (2*SQR(rayparam)));
 	}
 	
 	// initialise prev_delta
@@ -77,7 +82,7 @@ int btrack_init(struct btrack * bt, int hop_size, int frame_size){
 		for (int j = 0;j < 41;j++) {
 			x = j+1;
 			t_mu = i+1;
-			bt->tempoTransitionMatrix[i][j] = (1 / (m_sig * sqrt(2*pi))) * exp( (-1*pow((x-t_mu),2)) / (2*pow(m_sig,2)) );
+			bt->tempoTransitionMatrix[i][j] = (1 / (m_sig * sqrt(2*M_PI))) * exp( (-1*SQR((x-t_mu))) / (2*SQR(m_sig)) );
 		}
 	}
 	
@@ -499,7 +504,7 @@ static void updateCumulativeScore(struct btrack * bt, double odfSample) {
 	
 	// create window
 	for (int i = 0;i < winsize;i++) {
-		bt->w1[i] = exp((-1*pow(bt->tightness*log(-v/bt->beatPeriod),2))/2);
+		bt->w1[i] = exp((-1*SQR(bt->tightness*log(-v/bt->beatPeriod)))/2);
 		v = v+1;
 	}	
 	
@@ -541,9 +546,9 @@ static void predictBeat(struct btrack * bt){
 	
 	// create future window
 	double v = 1;
+  double d = 0.5/SQR(bt->beatPeriod*0.5);
 	for (int i = 0;i < windowSize;i++) {
-		w2[i] = exp((-1*pow((v - (bt->beatPeriod/2)),2))   /  (2*pow((bt->beatPeriod/2) ,2)));
-		v++;
+		w2[i] = exp((-1*SQR((i+1 - (bt->beatPeriod/2))))) * d;
 	}
 	
 	// create past window
@@ -553,7 +558,7 @@ static void predictBeat(struct btrack * bt){
 	int pastwinsize = end-start+1;
 
 	for (int i = 0;i < pastwinsize;i++) {
-		bt->w1[i] = exp((-1*pow(bt->tightness*log(-v/bt->beatPeriod),2))/2);
+		bt->w1[i] = exp((-0.5*SQR(bt->tightness*log(-v/bt->beatPeriod))));
 		v = v+1;
 	}
 
