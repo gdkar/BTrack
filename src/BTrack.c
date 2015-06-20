@@ -440,15 +440,14 @@ static void calculateOutputOfCombFilterBank(struct btrack * bt) {
 
 static void calculateBalancedACF(float *onsetDetectionFunction, float * acf) {
 	int l, n = 0;
-	float sum, tmp;
 	
 	// for l lags from 0-511
 	for (l = 0;l < 512;l++) {
-		sum = 0;	
+		float sum = 0;	
 		
 		// for n samples from 0 - (512-lag)
 		for (n = 0;n < (512-l);n++) {
-			tmp = onsetDetectionFunction[n] * onsetDetectionFunction[n+l];	// multiply current sample n by sample (n+l)
+			const float tmp = onsetDetectionFunction[n] * onsetDetectionFunction[n+l];	// multiply current sample n by sample (n+l)
 			sum = sum + tmp;	// add to sum
 		}
 		
@@ -457,35 +456,27 @@ static void calculateBalancedACF(float *onsetDetectionFunction, float * acf) {
 }
 
 static float calculateMeanOfArray(float *array, int startIndex,int endIndex) {
-	int i;
-	float sum = 0;
-
     int length = endIndex - startIndex;
-	
-	// find sum
-	for (i = startIndex;i < endIndex;i++) {
-		sum = sum + array[i];
-	}
-	
-    if (length > 0) {
-        return sum / length;	// average and return
-    } else {
-        return 0;
-    }
+    if(length>0){	
+      // find sum
+      int i;
+      float sum = 0.f;
+      for (i = startIndex;i < endIndex;i++) {
+        sum = sum + array[i];
+      }
+      return sum * (1.f/length);	// average and return
+    } else {return 0.f;}
 }
 
 static void normaliseArray(float * array, int N){
 	float sum = 0;
-	
-	for (int i = 0;i < N;i++) {
-		if (array[i] > 0) {
-			sum = sum + array[i];
-		}
-	}
-	
+  int i = 0;
+  for (;i<N;i++)
+    sum = MAX(fabsf(array[i]),sum);
 	if (sum > 0) {
-		for (int i = 0;i < N;i++) {
-			array[i] = array[i] / sum;
+    float sum_i = 1.0/sum;
+		for (int j = 0;j < N;j++) {
+			array[j] *=sum_i;
 		}
 	}
 }
@@ -510,20 +501,14 @@ static void updateCumulativeScore(struct btrack * bt, float odfSample) {
 	
 	// calculate new cumulative score value
 	max = 0;
-	int n = 0;
 	for (int i=start;i <= end;i++) {
-        wcumscore = bt->cumulativeScore[i]*bt->w1[n];
-        if (wcumscore > max) {
-            max = wcumscore;
-        }
-		n++;
+        wcumscore = bt->cumulativeScore[i]*bt->w1[i-start];
+        max=MAX(max,wcumscore);
 	}
 	
 	
 	// shift cumulative score back one
-	for (int i = 0;i < (bt->onsetDFBufferSize-1);i++) {
-		bt->cumulativeScore[i] = bt->cumulativeScore[i+1];
-	}
+  memmove(bt->cumulativeScore,bt->cumulativeScore+1,(bt->onsetDFBufferSize-1)*sizeof(float));
 	
 	// add new value to cumulative score
 	bt->cumulativeScore[bt->onsetDFBufferSize-1] = ((1-bt->alpha)*odfSample) + (bt->alpha*max);
@@ -540,9 +525,7 @@ static void predictBeat(struct btrack * bt){
     ASSERT(w2);
 
 	// copy cumscore to first part of fcumscore
-	for (int i = 0;i < bt->onsetDFBufferSize;i++) {
-		futureCumulativeScore[i] = bt->cumulativeScore[i];
-	}
+  memmove(futureCumulativeScore,bt->cumulativeScore,bt->onsetDFBufferSize*sizeof(float));
 	
 	// create future window
 	float v = 1;
@@ -573,33 +556,30 @@ static void predictBeat(struct btrack * bt){
 		max = 0;
 		n = 0;
 		for (int k=start;k <= end;k++) {
-			wcumscore = futureCumulativeScore[k]*bt->w1[n];
-			
-			if (wcumscore > max) {
-				max = wcumscore;
-			}
+			wcumscore = futureCumulativeScore[k]*bt->w1[k-start];
+		  max=MAX(wcumscore,max);	
 			n++;
 		}
 		
 		futureCumulativeScore[i] = max;
 	}
 	
+    
+    // predict beat
+    max = 0;
+    n = 0;
 	
-	// predict beat
-	max = 0;
-	n = 0;
-	
-	for (int i = bt->onsetDFBufferSize;i < (bt->onsetDFBufferSize+windowSize);i++) {
-		wcumscore = futureCumulativeScore[i]*w2[n];
-		if (wcumscore > max) {
-			max = wcumscore;
-			bt->beatCounter = n;
-		}	
-		n++;
-	}
+    for (int i = bt->onsetDFBufferSize;i < (bt->onsetDFBufferSize+windowSize);i++) {
+      wcumscore = futureCumulativeScore[i]*w2[n];
+      if (wcumscore > max) {
+        max = wcumscore;
+        bt->beatCounter = n;
+      }	
+      n++;
+    }
 		
-	// set next prediction time
-	bt->m0 = bt->beatCounter+round(bt->beatPeriod/2);
+    // set next prediction time
+    bt->m0 = bt->beatCounter+round(bt->beatPeriod/2);
 
     free(futureCumulativeScore);
     free(w2);
