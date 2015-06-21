@@ -36,7 +36,6 @@ static void calculateTempo(struct btrack * bt);
 static void adaptiveThreshold(float * x, int N, float * aux_buffer);
 static void calculateOutputOfCombFilterBank(struct btrack * bt);
 static void calculateBalancedACF(float * onsetDetectionFunction, float * acf);
-static float calculateMeanOfArray(float * array, int startIndex, int endIndex);
 static void normaliseArray(float * array, int N);
 static void updateCumulativeScore(struct btrack * bt, float odfSample);
 static void predictBeat(struct btrack * bt);
@@ -387,45 +386,30 @@ static void adaptiveThreshold(float * x, int N, float * aux_buffer) {
 	int i = 0;
 	int k,t = 0;
 	float * x_thresh = aux_buffer;
-	
 	int p_post = 7;
 	int p_pre = 8;
-	
-	t = MIN(N,p_post);	// what is smaller, p_post of df size. This is to avoid accessing outside of arrays
-	
-	// find threshold for first 't' samples, where a full average cannot be computed yet 
-	for (i = 0;i <= t;i++) {	
-		k = MIN((i+p_pre),N);
-		x_thresh[i] = calculateMeanOfArray(x,1,k);
-	}
-	// find threshold for bulk of samples across a moving average from [i-p_pre,i+p_post]
-	for (i = t+1;i < N-p_post;i++) {
-		x_thresh[i] = calculateMeanOfArray(x,i-p_pre,i+p_post);
-	}
-	// for last few samples calculate threshold, again, not enough samples to do as above
-	for (i = N-p_post;i < N;i++) {
-		k = MAX((i-p_post),1);
-		x_thresh[i] = calculateMeanOfArray(x,k,N);
-	}
-	
+  float acc = 0;
+  for ( ; i < 8; i++){acc += x[i];}
+  for(; i < 16;i++){
+    acc += x[i];
+    x_thresh[i-8] = acc/i;
+  }
+  for(; i<N;i++){
+    acc += x[i]-x[i-16];
+    x_thresh[i-8] = acc*(1./16);
+  }
+  for(;i-8<N;i++){
+    acc -= x[i-16];
+    x_thresh[i-8] = acc/((N+8-i));
+  }
 	// subtract the threshold from the detection function and check that it is not less than 0
-	for (i = 0;i < N;i++) {
-		x[i] = x[i] - x_thresh[i];
-		if (x[i] < 0) {
-			x[i] = 0;
-		}
-	}
+	for (i = 0;i < N;i++) {x[i] = MAX(x[i] - x_thresh[i],0);}
 }
 
 static void calculateOutputOfCombFilterBank(struct btrack * bt) {
 	int numelem;
-	
-	for (int i = 0;i < 128;i++) {
-		bt->combFilterBankOutput[i] = 0;
-	}
-	
+	for (int i = 0;i < 128;i++) {bt->combFilterBankOutput[i] = 0;}
 	numelem = 4;
-	
     // max beat period
 	for (int i = 2;i <= 127;i++) {
         // number of comb elements
@@ -440,33 +424,18 @@ static void calculateOutputOfCombFilterBank(struct btrack * bt) {
 
 static void calculateBalancedACF(float *onsetDetectionFunction, float * acf) {
 	int l, n = 0;
-	
 	// for l lags from 0-511
 	for (l = 0;l < 512;l++) {
 		float sum = 0;	
-		
 		// for n samples from 0 - (512-lag)
 		for (n = 0;n < (512-l);n++) {
 			const float tmp = onsetDetectionFunction[n] * onsetDetectionFunction[n+l];	// multiply current sample n by sample (n+l)
 			sum = sum + tmp;	// add to sum
 		}
-		
 		acf[l] = sum / (512-l);		// weight by number of mults and add to acf buffer
 	}
 }
 
-static float calculateMeanOfArray(float *array, int startIndex,int endIndex) {
-    int length = endIndex - startIndex;
-    if(length>0){	
-      // find sum
-      int i;
-      float sum = 0.f;
-      for (i = startIndex;i < endIndex;i++) {
-        sum = sum + array[i];
-      }
-      return sum * (1.f/length);	// average and return
-    } else {return 0.f;}
-}
 
 static void normaliseArray(float * array, int N){
 	float sum = 0;
@@ -563,8 +532,6 @@ static void predictBeat(struct btrack * bt){
 		
 		futureCumulativeScore[i] = max;
 	}
-	
-    
     // predict beat
     max = 0;
     n = 0;
@@ -577,10 +544,8 @@ static void predictBeat(struct btrack * bt){
       }	
       n++;
     }
-		
     // set next prediction time
     bt->m0 = bt->beatCounter+round(bt->beatPeriod/2);
-
     free(futureCumulativeScore);
     free(w2);
 }
