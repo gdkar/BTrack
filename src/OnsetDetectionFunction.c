@@ -278,7 +278,7 @@ static float phaseDeviation(struct odf * odf){
 		// calculate phase value
 		
     __m128 mag_diff = _mm_sub_ps(*(__m128*)(odf->magSpec+i),*(__m128*)(odf->prevMagSpec+i));
-    __m128 mask = _mm_cmpgt_ps(mag_diff,_mm_set1_ps(0.1));
+    __m128 mask = _mm_cmpgt_ps(mag_diff,_mm_set1_ps(0.0));
       __m128 dev = 
       _mm_sub_ps(_mm_add_ps(*(__m128*)(odf->phase+i),*(__m128*)(odf->prevPhase2+i)),
       _mm_add_ps(*(__m128*)(odf->prevPhase+i),*(__m128*)(odf->prevPhase+i)));
