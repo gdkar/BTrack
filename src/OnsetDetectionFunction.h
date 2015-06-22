@@ -22,8 +22,11 @@
 #ifndef __ONSETDETECTIONFUNCTION_H
 #define __ONSETDETECTIONFUNCTION_H
 
-#include "fftw3.h"
+#include <cmath>
 #include <vector>
+#include <fftw3.h>
+#include <ffts/ffts.h>
+#include "sse_mathfun.h"
 
 //=======================================================================
 /** The type of onset detection function to calculate */
@@ -57,46 +60,25 @@ enum WindowType
 class OnsetDetectionFunction
 {
 public:
-    
-    /** Constructor that defaults the onset detection function type to ComplexSpectralDifferenceHWR
-     * and the window type to HanningWindow
-     * @param hopSize_ the hop size in audio samples
-     * @param frameSize_ the frame size in audio samples
-     */
-	OnsetDetectionFunction(int hopSize_,int frameSize_);
-    
-    
     /** Constructor 
      * @param hopSize_ the hop size in audio samples
      * @param frameSize_ the frame size in audio samples
      * @param onsetDetectionFunctionType_ the type of onset detection function to use - (see OnsetDetectionFunctionType)
      * @param windowType the type of window to use (see WindowType)
      */
-	OnsetDetectionFunction(int hopSize_,int frameSize_,int onsetDetectionFunctionType_,int windowType_);
+	OnsetDetectionFunction(int hopSize_
+      ,int frameSize_
+      ,int onsetDetectionFunctionType_ = ComplexSpectralDifferenceHWR
+      ,int windowType_ = HanningWindow);
     
     /** Destructor */
 	~OnsetDetectionFunction();
-    
-    /** Initialisation function for only updating hop size and frame size (and not window type 
-     * or onset detection function type
-     * @param hopSize_ the hop size in audio samples
-     * @param frameSize_ the frame size in audio samples
-     */
-	void initialise(int hopSize_,int frameSize_);
-    
-    /** Initialisation Function 
-     * @param hopSize_ the hop size in audio samples
-     * @param frameSize_ the frame size in audio samples
-     * @param onsetDetectionFunctionType_ the type of onset detection function to use - (see OnsetDetectionFunctionType)
-     * @param windowType the type of window to use (see WindowType)
-     */
-	void initialise(int hopSize_,int frameSize_,int onsetDetectionFunctionType_,int windowType_);
 	
     /** Process input frame and calculate detection function sample 
      * @param buffer a pointer to an array containing the audio samples to be processed
      * @returns the onset detection function sample
      */
-	double calculateOnsetDetectionFunctionSample(double *buffer);
+	float calculateOnsetDetectionFunctionSample(float *buffer);
     
     /** Set the detection function type 
      * @param onsetDetectionFunctionType_ the type of onset detection function to use - (see OnsetDetectionFunctionType)
@@ -107,37 +89,38 @@ private:
 	
     /** Perform the FFT on the data in 'frame' */
 	void performFFT();
+  void toPolar();
 
     //=======================================================================
     /** Calculate energy envelope detection function sample */
-	double energyEnvelope();
+	float energyEnvelope();
     
     /** Calculate energy difference detection function sample */
-	double energyDifference();
+	float energyDifference();
     
     /** Calculate spectral difference detection function sample */
-	double spectralDifference();
+	float spectralDifference();
     
     /** Calculate spectral difference (half wave rectified) detection function sample */
-	double spectralDifferenceHWR();
+	float spectralDifferenceHWR();
     
     /** Calculate phase deviation detection function sample */
-	double phaseDeviation();
+	float phaseDeviation();
     
     /** Calculate complex spectral difference detection function sample */
-	double complexSpectralDifference();
+	float complexSpectralDifference();
     
     /** Calculate complex spectral difference detection function sample (half-wave rectified) */
-	double complexSpectralDifferenceHWR();
+	float complexSpectralDifferenceHWR();
     
     /** Calculate high frequency content detection function sample */
-	double highFrequencyContent();
+	float highFrequencyContent();
     
     /** Calculate high frequency spectral difference detection function sample */
-	double highFrequencySpectralDifference();
+	float highFrequencySpectralDifference();
     
     /** Calculate high frequency spectral difference detection function sample (half-wave rectified) */
-	double highFrequencySpectralDifferenceHWR();
+	float highFrequencySpectralDifferenceHWR();
 
     //=======================================================================
     /** Calculate a Rectangular window */
@@ -160,33 +143,31 @@ private:
      * @param phaseVal the phase value to process
      * @returns the wrapped phase value
      */
-	double princarg(double phaseVal);
-	
-	
-	double pi;							/**< pi, the constant */
+	float princarg(float phaseVal);
+  v4sf _mm_princarg_ps(v4sf);	
 	
 	int frameSize;						/**< audio framesize */
 	int hopSize;						/**< audio hopsize */
 	int onsetDetectionFunctionType;		/**< type of detection function */
-    int windowType;                     /**< type of window used in calculations */
+  int windowType;                     /**< type of window used in calculations */
 	
-	fftw_plan p;						/**< fftw plan */
-	fftw_complex *complexIn;			/**< to hold complex fft values for input */
-	fftw_complex *complexOut;			/**< to hold complex fft values for output */
-	
-	bool initialised;					/**< flag indicating whether buffers and FFT plans are initialised */
+	fftwf_plan p;						/**< fftw plan */
+  float         *realIn;
+  float         *imagIn;
+  float         *realOut;
+  float         *imagOut;
 
-    std::vector<double> frame;          /**< audio frame */
-    std::vector<double> window;         /**< window */
+  std::vector<float> frame;          /**< audio frame */
+  std::vector<float> window;         /**< window */
 	
-	double prevEnergySum;				/**< to hold the previous energy sum value */
+	v4sf prevEnergySum;				/**< to hold the previous energy sum value */
 	
-    std::vector<double> magSpec;        /**< magnitude spectrum */
-    std::vector<double> prevMagSpec;    /**< previous magnitude spectrum */
+  std::vector<float> magSpec;        /**< magnitude spectrum */
+  std::vector<float> prevMagSpec;    /**< previous magnitude spectrum */
 	
-    std::vector<double> phase;          /**< FFT phase values */
-    std::vector<double> prevPhase;      /**< previous phase values */
-    std::vector<double> prevPhase2;     /**< second order previous phase values */
+  std::vector<float> phase;          /**< FFT phase values */
+  std::vector<float> prevPhase;      /**< previous phase values */
+  std::vector<float> prevPhase2;     /**< second order previous phase values */
 
 };
 

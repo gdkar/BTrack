@@ -63,9 +63,9 @@ typedef __m128i v4si; // vector of 4 int (sse2)
 #define _PS_CONST(Name, Val)                                            \
   static const ALIGN16_BEG float _ps_##Name[4] ALIGN16_END = { Val, Val, Val, Val }
 #define _PI32_CONST(Name, Val)                                            \
-  static const ALIGN16_BEG int _pi32_##Name[4] ALIGN16_END = { Val, Val, Val, Val }
+  static const ALIGN16_BEG int _pi32_##Name[4] ALIGN16_END = { (int)Val,(int) Val, (int)Val, (int)Val }
 #define _PS_CONST_TYPE(Name, Type, Val)                                 \
-  static const ALIGN16_BEG Type _ps_##Name[4] ALIGN16_END = { Val, Val, Val, Val }
+  static const ALIGN16_BEG Type _ps_##Name[4] ALIGN16_END = { (Type)Val,(Type) Val,(Type) Val,(Type) Val }
 
 _PS_CONST(1  , 1.0f);
 _PS_CONST(0p5, 0.5f);
@@ -245,6 +245,7 @@ _PS_CONST(coscof_p2,  4.166664568298827E-002);
 _PS_CONST(cephes_FOPI, 1.27323954473516); // 4 / M_PI
 _PS_CONST(cephes_PI, 3.14159265358979323846);
 _PS_CONST(cephes_minus_PI, -3.14159265358979323846);
+_PS_CONST(cephes_TWOPI, -(2*3.14159265358979323846));
 _PS_CONST(cephes_PIO2,1.57079632679489661923); 
 _PS_CONST(cephes_PIO4, 7.85398163397448309616E-1);
 

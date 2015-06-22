@@ -41,9 +41,9 @@ CXX := g++
 
 ## commented this out while I don't have both 32 and 64 bit versions of the libraries
 #CXXFLAGS := -mmacosx-version-min=10.5 -arch i386 -arch x86_64 -I$(VAMP_SDK_DIR) -Wall -fPIC
-CXXFLAGS := -mmacosx-version-min=10.5 -arch x86_64 -I$(VAMP_SDK_DIR) -Wall -fPIC
-PLUGIN_EXT := .dylib
-LDFLAGS := $(CXXFLAGS) -dynamiclib -lfftw3 -lsamplerate -install_name $(PLUGIN_LIBRARY_NAME)$(PLUGIN_EXT) $(VAMP_SDK_DIR)/libvamp-sdk.a -exported_symbols_list vamp-plugin.list
+#CXXFLAGS := -mmacosx-version-min=10.5 -arch native -I$(VAMP_SDK_DIR) -Wall -fPIC
+#PLUGIN_EXT := .dylib
+#LDFLAGS := $(CXXFLAGS) -dynamiclib -lfftw3 -lsamplerate -install_name $(PLUGIN_LIBRARY_NAME)$(PLUGIN_EXT) $(VAMP_SDK_DIR)/libvamp-sdk.a -exported_symbols_list vamp-plugin.list
 
 
 ## Uncomment these for an OS/X universal binary (PPC and 32- and
@@ -67,9 +67,9 @@ LDFLAGS := $(CXXFLAGS) -dynamiclib -lfftw3 -lsamplerate -install_name $(PLUGIN_L
 
 ##  Uncomment these for Linux using the standard tools:
 
-# CXXFLAGS := -I$(VAMP_SDK_DIR) -Wall -fPIC
-# PLUGIN_EXT := .so
-# LDFLAGS := -shared -Wl,-soname=$(PLUGIN_LIBRARY_NAME)$(PLUGIN_EXT) $(VAMP_SDK_DIR)/libvamp-sdk.a -Wl,--version-script=vamp-plugin.map
+ CXXFLAGS := -I../../src -I$(VAMP_SDK_DIR) -Wall -fPIC -march=native -g -ggdb -Ofast -ffast-math -std=gnu++14
+ PLUGIN_EXT := .so
+ LDFLAGS := -shared -Wl,-soname=$(PLUGIN_LIBRARY_NAME)$(PLUGIN_EXT) -lvamp-sdk -Wl,--version-script=vamp-plugin.map
 
 
 ##  Uncomment these for a cross-compile from Linux to Windows using MinGW:
