@@ -384,10 +384,7 @@ static void calculateTempo(struct btrack * bt){
 
 static void adaptiveThreshold(float * x, int N, float * aux_buffer) {
 	int i = 0;
-	int k,t = 0;
 	float * x_thresh = aux_buffer;
-	int p_post = 7;
-	int p_pre = 8;
   float acc = 0;
   for ( ; i < 8; i++){acc += x[i];}
   for(; i < 16;i++){
