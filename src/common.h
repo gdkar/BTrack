@@ -1,7 +1,10 @@
+_Pragma("once")
+
 #include <fftw3.h>
 #include "sse_mathfun.h"
 #include <stdlib.h>
 #include <stdbool.h>
+#include <assert.h>
 
 #ifndef MIN
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))

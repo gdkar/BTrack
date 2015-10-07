@@ -19,9 +19,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 //=======================================================================
+_Pragma("once")
 
-#ifndef __ONSETDETECTIONFUNCTION_H
-#define __ONSETDETECTIONFUNCTION_H
 #include "sse_mathfun.h"
 #include <string.h>
 #include "common.h"
@@ -96,5 +95,3 @@ void odf_del(struct odf * odf);
 
 float odf_calculate_sample(struct odf * odf, float * buffer);
 void odf_set_type(struct odf * odf, enum OnsetDetectionFunctionType type);
-
-#endif

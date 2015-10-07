@@ -20,8 +20,7 @@
  */
 //=======================================================================
 
-#ifndef __BTRACK_H
-#define __BTRACK_H
+_Pragma("once")
 #ifndef _ISOC11_SOURCE
 #define _ISOC11_SOURCE
 #endif
@@ -39,22 +38,17 @@ struct btrack {
     float * onsetDF;                       /**< to hold onset detection function */
     float * cumulativeScore;               /**< to hold cumulative score */
     float * w1;
-
     float resampledOnsetDF[512];           /**< to hold resampled detection function */
     float acf[512];                        /**<  to hold autocorrelation function */
     float weightingVector[128];            /**<  to hold weighting vector */
     float combFilterBankOutput[128];       /**<  to hold comb filter output */
     float tempoObservationVector[41];      /**<  to hold tempo version of comb filter output */
-	
     float delta[41];                       /**<  to hold final tempo candidate array */
     float prevDelta[41];                   /**<  previous delta */
     float prevDeltaFixed[41];              /**<  fixed tempo version of previous delta */
-	
     float tempoTransitionMatrix[41][41];   /**<  tempo transition matrix */
-    
 	//=======================================================================
     // parameters
-    
     float tightness;                       /**< the tightness of the weighting used to calculate cumulative score */
     float alpha;                           /**< the mix between the current detection function sample and the cumulative score's "momentum" */
     float beatPeriod;                      /**< the beat period, in detection function samples */
@@ -69,28 +63,20 @@ struct btrack {
     int onsetDFBufferSize;                  /**< the onset detection function buffer size */
     int tempoFixed;                         /**< indicates whether the tempo should be fixed or not */
     int beatDueInFrame;                     /**< indicates whether a beat is due in the current frame */
-
 };
-
 /** Constructor taking both hopSize and frameSize
 * @param hop_size the hop size in audio samples
 * @param frame_size the frame size in audio samples
 */
 int btrack_init(struct btrack * bt, int hop_size, int frame_size);
 void btrack_del(struct btrack * bt);
-
 void btrack_process_audio_frame(struct btrack * bt, float * frame);
 void btrack_process_odf_sample(struct btrack * bt, float odf_sample);
-
 int btrack_beat_due_in_current_frame(struct btrack * bt);
 float btrack_get_bpm(struct btrack * bt);
 float btrack_get_latest_score(struct btrack * bt);
 float btrack_get_latest_odf(struct btrack * bt);
-
 void btrack_set_bpm(struct btrack * bt, float bpm);
 void btrack_fix_bpm(struct btrack * bt, float bpm);
 void btrack_nofix_bpm(struct btrack * bt);
-
 void btrack_set_hop_size(struct btrack * bt, int hop_size);
-
-#endif

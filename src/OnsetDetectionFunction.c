@@ -24,7 +24,6 @@
 #include <math.h>
 
 static void performFFT(struct odf * odf);
-
 static float energyEnvelope(struct odf * odf);
 static float energyDifference(struct odf * odf);
 static float spectralDifference(struct odf * odf);
@@ -38,7 +37,7 @@ static float highFrequencySpectralDifferenceHWR(struct odf * odf);
 static inline float __attribute__((unused)) princarg(float arg)
 {
   static const float one_over_two_pi = 1/(2*M_PI);
-  return arg - (2*M_PI)*floorf(arg*one_over_two_pi);
+  return arg - ((float)(2*M_PI))*floorf(arg*one_over_two_pi);
 }
 static inline __m128 princarg_ps(const __m128);
 static void calculateRectangularWindow(float * window, int frameSize);	
@@ -50,13 +49,10 @@ static void calculateTukeyWindow(float * window, int frameSize);
 int odf_init(struct odf * odf, int hop_size, int frame_size, enum OnsetDetectionFunctionType odf_type, enum WindowType window_type){
     // if we have already initialised FFT plan
     odf_del(odf);
-	
-	odf->hopSize = hop_size; // set hopsize
-	odf->frameSize = frame_size; // set framesize
-	
+    odf->hopSize = hop_size; // set hopsize
+    odf->frameSize = frame_size; // set framesize
     odf->type = odf_type;
     odf->windowType = window_type;
-		
 	// initialise buffers
     odf->frame = malloc(sizeof(float) * frame_size);
     odf->window = malloc(sizeof(float) * frame_size);
@@ -66,7 +62,6 @@ int odf_init(struct odf * odf, int hop_size, int frame_size, enum OnsetDetection
     odf->prevPhase = malloc(sizeof(float) * frame_size);
     odf->prevPhase2 = malloc(sizeof(float) * frame_size);
     ASSERT(odf->frame && odf->window && odf->magSpec && odf->prevMagSpec && odf->phase && odf->prevPhase && odf->prevPhase2);
-	
 	// set the window to the specified type
 	switch (window_type){
 		case RectangularWindow:
@@ -87,7 +82,6 @@ int odf_init(struct odf * odf, int hop_size, int frame_size, enum OnsetDetection
 		default:
 			calculateHanningWindow(odf->window, frame_size);			// DEFAULT: Hanning Window
 	}
-	
 	// initialise previous magnitude spectrum to zero
   memset(odf->prevMagSpec,0,frame_size*sizeof(float));
   memset(odf->prevPhase,0,frame_size*sizeof(float));
@@ -102,11 +96,9 @@ int odf_init(struct odf * odf, int hop_size, int frame_size, enum OnsetDetection
   fftw_iodim transform_dims[] = {{ .n = frame_size, .is = 1, .os=1}};
   odf->p = fftwf_plan_guru_split_dft(1, transform_dims, 0, NULL,
   odf->realIn,odf->imagIn,odf->realOut,odf->imagOut,FFTW_ESTIMATE);
-	
 	odf->initialised = true;
-    return 0;
+  return 0;
 }
-
 void odf_del(struct odf * odf){
     if (odf->initialised) {
         // destroy fft plan
