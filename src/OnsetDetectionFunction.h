@@ -26,6 +26,15 @@
 #include "fftw3.h"
 #include "common.h"
 
+#include <memory>
+#include <utility>
+#include <functional>
+#include <algorithm>
+#include <numeric>
+#include <limits>
+#include <iterator>
+#include "Plan.hpp"
+
 //=======================================================================
 /** The type of onset detection function to calculate */
 enum OnsetDetectionFunctionType
@@ -58,42 +67,45 @@ enum WindowType
 //=======================================================================
 /** A class for calculating onset detection functions. */
 struct odf {
+    using Plan = retrack::Plan;
+    using float_type = Plan::float_type;
 	int frameSize;						/**< audio framesize */
 	int hopSize;						/**< audio hopsize */
-	enum OnsetDetectionFunctionType type;		/**< type of detection function */
-    enum WindowType windowType;                     /**< type of window used in calculations */
-	
-	fftw_plan p;						/**< fftw plan */
-	fftw_complex *complexIn;			/**< to hold complex fft values for input */
-	fftw_complex *complexOut;			/**< to hold complex fft values for output */
-	
+	OnsetDetectionFunctionType type;		/**< type of detection function */
+    WindowType windowType;                     /**< type of window used in calculations */
+    Plan p;
+    retrack::detail::fftwf_ptr<float_type> complexIn;
+    retrack::detail::fftwf_ptr<float_type> complexOut;
+
 	int initialised;					/**< flag indicating whether buffers and FFT plans are initialised */
 
-    double * frame;                     /**< audio frame */
-    double * window;                    /**< window */
-	
-	double prevEnergySum;				/**< to hold the previous energy sum value */
-	
-    double * magSpec;                   /**< magnitude spectrum */
-    double * prevMagSpec;               /**< previous magnitude spectrum */
-	
-    double * phase;                     /**< FFT phase values */
-    double * prevPhase;                 /**< previous phase values */
-    double * prevPhase2;                 /**< second order previous phase values */
+    std::unique_ptr<float[]> frame;
+    std::unique_ptr<float[]> window;                     /**< audio frame */
+
+	float prevEnergySum;				/**< to hold the previous energy sum value */
+
+    std::unique_ptr<float[]> magSpec;                   /**< magnitude spectrum */
+    std::unique_ptr<float[]> prevMagSpec;               /**< previous magnitude spectrum */
+
+    std::unique_ptr<float[]> phase;                     /**< FFT phase values */
+    std::unique_ptr<float[]> prevPhase;                 /**< previous phase values */
+    std::unique_ptr<float[]> prevPhase2;                 /**< second order previous phase values */
+
+    odf() = default;;
+    odf(int hop_size, int frame_size, OnsetDetectionFunctionType odf_type, WindowType window_type);
+  ~odf();
+    float process_frame(const btrack_chunk_t * buffer);
+    float process_fft_frame(const btrack_chunk_t * fft_buffer); // XXX: This is not implemented yet
+    void set_type(enum OnsetDetectionFunctionType type);
 
 };
 
-/** Constructor 
+/** Constructor
 * @param hopSize_ the hop size in audio samples
 * @param frameSize_ the frame size in audio samples
 * @param onsetDetectionFunctionType_ the type of onset detection function to use - (see OnsetDetectionFunctionType)
 * @param windowType the type of window to use (see WindowType)
 */
-int odf_init(struct odf * odf, int hop_size, int frame_size, enum OnsetDetectionFunctionType odf_type, enum WindowType window_type);
-void odf_del(struct odf * odf);
 
-double odf_process_frame(struct odf * odf, const btrack_chunk_t * buffer);
-double odf_process_fft_frame(struct odf * odf, const btrack_chunk_t * fft_buffer); // XXX: This is not implemented yet
-void odf_set_type(struct odf * odf, enum OnsetDetectionFunctionType type);
 
 #endif

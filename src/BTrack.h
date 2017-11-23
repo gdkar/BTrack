@@ -23,11 +23,18 @@
 #ifndef __BTRACK_H
 #define __BTRACK_H
 
+#include <memory>
+#include <utility>
+#include <functional>
+#include <algorithm>
+#include <numeric>
+#include <limits>
+#include <iterator>
+
+#include "SlideBuffer.hpp"
+#include "ACF.hpp"
 #include "OnsetDetectionFunction.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 //=======================================================================
 /** The main beat tracking class and the interface to the BTrack
@@ -36,37 +43,47 @@ extern "C" {
  * contains some static functions for calculating beat times in seconds
  */
 struct btrack {
-    struct odf odf;
+    btrack(int hop_size, int frame_size, int sample_rate);
+    btrack() = default;
+   ~btrack() = default;
+    odf m_odf;
     int frameSize;
-    double invSampleRate;
-    double * onsetDF;                       /**< to hold onset detection function */
-    double * cumulativeScore;               /**< to hold cumulative score */
-    double * w1;
+    float invSampleRate;
+    retrack::SlideBuffer<float>                  m_odf_buf{};
+    retrack::SlideBuffer<std::pair<float,int> >  m_cum_buf{};
 
-    double resampledOnsetDF[512];           /**< to hold resampled detection function */
-    double acf[512];                        /**<  to hold autocorrelation function */
-    double weightingVector[128];            /**<  to hold weighting vector */
-    double combFilterBankOutput[128];       /**<  to hold comb filter output */
-    double tempoObservationVector[41];      /**<  to hold tempo version of comb filter output */
-	
-    double delta[41];                       /**<  to hold final tempo candidate array */
-    double prevDelta[41];                   /**<  previous delta */
-    double prevDeltaFixed[41];              /**<  fixed tempo version of previous delta */
-	
-    double tempoTransitionMatrix[41][41];   /**<  tempo transition matrix */
-    
+    retrack::ACF m_acf{};
+
+    std::unique_ptr<float[]> onsetDF;
+           /**< to hold onset detection function */
+    std::unique_ptr<float[]> cumulativeScore;               /**< to hold cumulative score */
+    std::unique_ptr<float[]> w1;
+    float                    w1size{};
+
+    float resampledOnsetDF[512];           /**< to hold resampled detection function */
+    float acf[512];                        /**<  to hold autocorrelation function */
+    float weightingVector[128];            /**<  to hold weighting vector */
+    float combFilterBankOutput[128];       /**<  to hold comb filter output */
+    float tempoObservationVector[41];      /**<  to hold tempo version of comb filter output */
+
+    float delta[41];                       /**<  to hold final tempo candidate array */
+    float prevDelta[41];                   /**<  previous delta */
+    float prevDeltaFixed[41];              /**<  fixed tempo version of previous delta */
+
+    float tempoTransitionMatrix[41][41];   /**<  tempo transition matrix */
+
 	//=======================================================================
     // parameters
-    
-    double tightness;                       /**< the tightness of the weighting used to calculate cumulative score */
-    double alpha;                           /**< the mix between the current detection function sample and the cumulative score's "momentum" */
-    double beatPeriod;                      /**< the beat period, in detection function samples */
-    double tempo;                           /**< the tempo in beats per minute */
-    double estimatedTempo;                  /**< the current tempo estimation being used by the algorithm */
-    double latestCumulativeScoreValue;      /**< holds the latest value of the cumulative score function */
-    double latestODF;                       /**< holds the latest value of the onset detection function*/
-    double latestConfidence;                /**< holds the latest confidence value, the ratio between max score & min score in the last beat */
-    double tempoToLagFactor;                /**< factor for converting between lag and tempo */
+
+    float tightness;                       /**< the tightness of the weighting used to calculate cumulative score */
+    float alpha;                           /**< the mix between the current detection function sample and the cumulative score's "momentum" */
+    float beatPeriod;                      /**< the beat period, in detection function samples */
+    float tempo;                           /**< the tempo in beats per minute */
+    float estimatedTempo;                  /**< the current tempo estimation being used by the algorithm */
+    float latestCumulativeScoreValue;      /**< holds the latest value of the cumulative score function */
+    float latestODF;                       /**< holds the latest value of the onset detection function*/
+    float latestConfidence;                /**< holds the latest confidence value, the ratio between max score & min score in the last beat */
+    float tempoToLagFactor;                /**< factor for converting between lag and tempo */
     int m0;                                 /**< indicates when the next point to predict the next beat is */
     int beatCounter;                        /**< keeps track of when the next beat is - will be zero when the beat is due, and is set elsewhere in the algorithm to be positive once a beat prediction is made */
     int hopSize;                            /**< the hop size being used by the algorithm */
@@ -80,29 +97,22 @@ struct btrack {
 * @param hop_size the hop size in audio samples
 * @param frame_size the frame size in audio samples
 */
-int btrack_init(struct btrack * bt, int hop_size, int frame_size, int sample_rate);
-void btrack_del(struct btrack * bt);
-
 void btrack_process_audio_frame(struct btrack * bt, const btrack_chunk_t * frame);
 void btrack_process_fft_frame(struct btrack * bt, const btrack_chunk_t * fft_frame);
-void btrack_process_odf_sample(struct btrack * bt, double odf_sample);
+void btrack_process_odf_sample(struct btrack * bt, float odf_sample);
 
 int btrack_beat_due_in_current_frame(const struct btrack * bt);
-double btrack_get_bpm(const struct btrack * bt);
-double btrack_get_latest_score(const struct btrack * bt);
-double btrack_get_latest_odf(const struct btrack * bt);
-double btrack_get_latest_confidence(const struct btrack * bt);
+float btrack_get_bpm(const struct btrack * bt);
+float btrack_get_latest_score(const struct btrack * bt);
+float btrack_get_latest_odf(const struct btrack * bt);
+float btrack_get_latest_confidence(const struct btrack * bt);
 int btrack_get_frames_until_beat(const struct btrack * bt);
-double btrack_get_time_until_beat(const struct btrack * bt);
+float btrack_get_time_until_beat(const struct btrack * bt);
 
-void btrack_set_bpm(struct btrack * bt, double bpm);
-void btrack_fix_bpm(struct btrack * bt, double bpm);
+void btrack_set_bpm(struct btrack * bt, float bpm);
+void btrack_fix_bpm(struct btrack * bt, float bpm);
 void btrack_nofix_bpm(struct btrack * bt);
 
 void btrack_set_hop_size(struct btrack * bt, int hop_size);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif
