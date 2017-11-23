@@ -196,6 +196,25 @@ public:
     {
         return m_data[idx];
     }
+    template<class I>
+    I append(I from, size_type count)
+    {
+        auto req = request(count);
+        count = std::min<size_type>(count,req.size());
+        from = std::copy_n(from, count, std::begin(req));
+        commit(count);
+        return from;
+    }
+    template<class I>
+    I append(I from, I to)
+    {
+        auto n = std::distance(from,to);
+        auto req = request(n);
+        n = std::min<difference_type>(n,req.size());
+        from = std::copy_n(from, n, std::begin(req));
+        commit(n);
+        return from;
+    }
     void push_back(const_reference item)
     {
         {

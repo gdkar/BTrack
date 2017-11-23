@@ -94,6 +94,9 @@ struct ACF {
     template<class I, class O>
     O process(I src, O dst)
     {
+        if(!m_size)
+            return dst;
+
         auto _t = time_data();
         auto _f = freq_data();
         auto _fr = _f[0].begin();
@@ -123,6 +126,9 @@ struct ACF {
     template<class I, class O>
     O process_lapped(I src, O dst)
     {
+        if(!m_size)
+            return dst;
+
         auto _t = time_data();
         auto _f0 = freq_data();
         auto _f1 = freq_data();
@@ -155,8 +161,8 @@ protected:
     size_type                       m_coef{};
     size_type                       m_spacing{};
     detail::fftwf_ptr<value_type>   m_time{};
-    detail::fftwf_ptr<value_type> m_freq{};
-    detail::fftwf_ptr<value_type> m_freq1{};
+    detail::fftwf_ptr<value_type>   m_freq{};
+    detail::fftwf_ptr<value_type>   m_freq1{};
     Plan                            m_r2c{};
     Plan                            m_c2r{};
 };

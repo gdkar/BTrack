@@ -48,7 +48,8 @@ static void calclulateHammingWindow(float * window, int frameSize);
 static void calculateBlackmanWindow(float * window, int frameSize);
 static void calculateTukeyWindow(float * window, int frameSize);
 
-odf::odf(int hop_size, int frame_size, enum OnsetDetectionFunctionType odf_type, enum WindowType window_type) {
+odf::odf(int hop_size, int frame_size, float rate, OnsetDetectionFunctionType odf_type, WindowType window_type)
+: sampleRate{rate}{
     // if we have already initialised FFT plan
     //odf_del(odf);
 
@@ -60,7 +61,8 @@ odf::odf(int hop_size, int frame_size, enum OnsetDetectionFunctionType odf_type,
     windowType = window_type;
 
 	// initialise buffers
-    frame = std::make_unique<float[]>(frame_size);
+    frame = SlideBuffer<float>(frame_size);
+//    frame = std::make_unique<float[]>(frame_size);
     window = std::make_unique<float[]>(frame_size);
     magSpec= std::make_unique<float[]>(frame_size);
     prevMagSpec= std::make_unique<float[]>(frame_size);
@@ -90,12 +92,12 @@ odf::odf(int hop_size, int frame_size, enum OnsetDetectionFunctionType odf_type,
 
 	prevEnergySum = 0.0;	// initialise previous energy sum value to zero
 
-	complexIn = detail::make_fftwf<float_type>(frame_size  * 2);
+	complexIn = detail::make_fftwf<float_type>(frame_size );
 	complexOut = detail::make_fftwf<float_type>(frame_size * 2);
     /*  Init fft */
 //	complexIn = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * frame_size);		// complex array to hold fft data
 //	complexOut = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * frame_size);	// complex array to hold fft data
-    p = Plan::dft_1d_c2c(frame_size,complexIn.get(),complexIn.get() + frame_size,complexOut.get(),complexOut.get() + frame_size,  FFTW_ESTIMATE|FFTW_PRESERVE_INPUT);
+    p = Plan::dft_1d_r2c(frame_size,complexIn.get(),complexOut.get(),complexOut.get() + frame_size,  FFTW_ESTIMATE|FFTW_PRESERVE_INPUT);
 //	p = fftwf_plan_dft_1d(frame_size, complexIn, complexOut, FFTW_FORWARD, FFTW_ESTIMATE);	// FFT plan initialisation
 
 }
@@ -110,6 +112,8 @@ float odf::process_frame(const btrack_chunk_t * buffer){
 	float odfSample;
 
 	// shift audio samples back in frame by hop size
+    frame.append(buffer,buffer + hopSize);
+/*    auto req = frame.request(
 	for (int i = 0; i < (frameSize-hopSize);i++) {
 		frame[i] = frame[i+hopSize];
 	}
@@ -119,7 +123,7 @@ float odf::process_frame(const btrack_chunk_t * buffer){
 	for (int i = (frameSize-hopSize);i < frameSize;i++) {
 		frame[i] = buffer[j];
 		j++;
-	}
+	}*/
 
 	switch (type){
 		case EnergyEnvelope:
@@ -183,62 +187,55 @@ float odf::process_fft_frame(const btrack_chunk_t * buffer) {
 }
 
 static void performFFT(struct odf * odf) {
-	int fsize2 = (odf->frameSize/2);
+    auto fsize = odf->frameSize;
+    auto fsize2 = fsize / 2;
+    auto fsize2p = fsize2 + 1;
+
     auto r_out = odf->complexOut.get();
-    auto i_out = r_out + odf->frameSize;
+    auto i_out = r_out + fsize;
 
 	// window frame and copy to complex array, swapping the first and second half of the signal
-	for (int i = 0;i < fsize2;i++)
-	{
-		odf->complexIn[i] = odf->frame[i+fsize2] * odf->window[i+fsize2];
-//		odf->complexIn[i][1] = 0.0;
-		odf->complexIn[i+fsize2] = odf->frame[i] * odf->window[i];
-//		odf->complexIn[i+fsize2][1] = 0.0;
-	}
+    auto rd = odf->frame.kept_range();
+    std::transform(
+        std::begin(rd)
+       ,std::end(rd)
+       ,&odf->window[0]
+       ,&odf->complexIn[0]
+       ,[](auto x,auto y){return x*y;}
+        );
+
+    std::rotate(&odf->complexIn[0],&odf->complexIn[0] + fsize2, &odf->complexIn[0] + fsize);
 	// perform the fft
     odf->p.execute(odf->complexIn.get(),r_out);
 	// compute first (N/2)+1 mag values
-	for (int i = 0;i < (odf->frameSize/2)+1;i++) {
+	for (int i = 0;i < fsize2p;i++) {
 		// calculate phase value
         auto _i = i_out[i];
         auto _r = r_out[i];
-		odf->phase[i] = std::atan2(_i,_r);
-		// calculate magnitude value
-		odf->magSpec[i] = std::hypot(_i,_r);
+        auto _a = std::atan2(_i,_r);
+        auto _m = std::hypot(_i,_r);
+        odf->phase[i] = _a;
+        odf->magSpec[i] = _m;
+        if(i) {
+            odf->phase[fsize-i] = -_a;
+            odf->magSpec[fsize-i] = _m;
+        }
 	}
-	// mag spec symmetric above (N/2)+1 so copy previous values
-	for (int i = (odf->frameSize/2)+1;i < odf->frameSize;i++) {
-		odf->magSpec[i] = odf->magSpec[odf->frameSize-i];
-        odf->phase[i]   = -odf->phase[odf->frameSize-i];
-	}
-
 }
 
 ////////////////////////////// Methods for Detection Functions /////////////////////////////////
 
 static float energyEnvelope(struct odf * odf){
-	float sum = 0;
-
-	// sum the squares of the samples
-	for (int i = 0;i < odf->frameSize;i++) {
-		sum = sum + (odf->frame[i]*odf->frame[i]);
-	}
-
-	return sum;		// return sum
+    auto rd = odf->frame.kept_range();
+    return std::inner_product(rd.begin(),rd.end(),rd.begin(),0.f);
 }
 
 static float energyDifference(struct odf * odf){
-	float sum = 0;
-	float sample;
-
-	// sum the squares of the samples
-	for (int i = 0;i < odf->frameSize;i++) {
-		sum = sum + (odf->frame[i]*odf->frame[i]);
-	}
-	sample = sum - odf->prevEnergySum;	// sample is first order difference in energy
-    odf->prevEnergySum = sum;
-
-    return std::min(sample, 0.f);
+    auto rd = odf->frame.kept_range();
+    auto sum = std::inner_product(rd.begin(),rd.end(),rd.begin(),0.f);
+    using std::swap;
+    swap(sum,odf->prevEnergySum);
+    return std::min(0.f,odf->prevEnergySum - sum);	// sample is first order difference in energy
 }
 
 static float spectralDifference(struct odf * odf){

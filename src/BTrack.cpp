@@ -118,24 +118,28 @@ void adaptive_threshold(I ibeg, I iend, size_t _winlen = 15)
 }
 }
 using namespace retrack;
-static void resampleOnsetDetectionFunction(struct btrack * bt);
-static void calculateTempo(struct btrack * bt);
+static void resampleOnsetDetectionFunction(btrack * bt);
+static void calculateTempo(btrack * bt);
 //static void adaptiveThreshold(float * x, int N, float * aux_buffer);
-static void calculateOutputOfCombFilterBank(struct btrack * bt);
+static void calculateOutputOfCombFilterBank(btrack * bt);
 //static void calculateBalancedACF(float* onsetDetectionFunction, float * acf);
 //static float calculateMeanOfArray(float * array, int startIndex, int endIndex);
-static void updateCumulativeScore(struct btrack * bt, float odfSample);
-static void predictBeat(struct btrack * bt);
+static void updateCumulativeScore(btrack * bt, float odfSample);
+static void predictBeat(btrack * bt);
+static void update_w1(btrack *bt);
 
 // Ex. hop_size = 512; frame_size = 1024
-btrack::btrack(int hop_size, int frame_size, int sample_rate)
-: m_odf(hop_size, frame_size, ComplexSpectralDifferenceSq, HanningWindow)
-, m_acf(512)
+btrack::btrack(int hop_size, int frame_size, float sample_rate)
+: m_odf(hop_size, frame_size, sample_rate, ComplexSpectralDifferenceSq, HanningWindow)
+, m_sample_rate{sample_rate}
+, m_frame_size{frame_size}
+, m_hop_size{hop_size}
+, m_odf_rate{}
+, m_acf_rate{}
+, m_odf_time{}
+, m_acf_time{}
+, m_acf()
 {
-    hopSize = hop_size;
-    frameSize = frame_size;
-    invSampleRate = 1.0 / (double) sample_rate;
-
     auto rayparam = 43.;
 
 	// initialise parameters
@@ -164,7 +168,7 @@ btrack::btrack(int hop_size, int frame_size, int sample_rate)
 	auto m_sig = 41/8.f;
 	for (int i = 0;i < 41;i++) {
 		for (int j = 0;j < 41;j++)
-			tempoTransitionMatrix[i][j] = detail::gaussian(float(j+1),float(m_sig),float(i+1));
+			tempoTransitionMatrix[i][j] = detail::gaussian_unorm(float(j+1),float(m_sig),float(i+1));
 	}
 
 	// tempo is not fixed
@@ -178,46 +182,137 @@ btrack::btrack(int hop_size, int frame_size, int sample_rate)
     btrack_set_hop_size(this, hop_size);
 }
 
-int btrack_beat_due_in_current_frame(const struct btrack * bt){
+void btrack::configure()
+{
+    if(m_configured)
+        return;
+
+    if(!m_hop_size) {
+        if(!m_odf_rate) {
+            if(!m_odf_time) {
+                m_odf_time = 512 / 44100.f;
+            }
+            m_odf_rate = 1. / m_odf_time;
+        }
+        m_hop_size = std::round(m_sample_rate / m_odf_rate);
+    }
+    m_odf_rate = m_sample_rate / m_hop_size;
+    m_odf_time = 1 / m_odf_rate;
+
+    if(!m_acf_rate) {
+        if(!m_acf_time) {
+            m_acf_time = m_odf_time;
+        }
+        m_acf_rate = 1. / m_acf_time;
+    }
+    m_acf_time = 1. / m_acf_rate;
+
+    if(!m_acf_duration) {
+        if(!m_acf_size) {
+            m_acf_duration = 5.9443f;
+        } else {
+            m_acf_duration = m_acf_size * m_acf_time;
+        }
+    }
+    m_acf_size = std::round(m_acf_duration * m_acf_rate);
+    m_acf_buf_size = 2 * m_acf_size;
+    m_odf_buf_size = m_acf_buf_size * m_acf_time / m_odf_time;
+
+    m_acf = ACF(m_acf_size);
+    m_odf_buf = SlideBuffer<float>(m_odf_buf_size);
+
+    if(!w1threshold)
+        w1threshold = 1e-2f;
+
+    if(!m_weights_threshold)
+        m_weights_threshold = 1e-2f;
+
+    m_tempos.clear();
+    {
+        auto make_tempo = [&](float t) {
+            m_tempos.emplace_back();
+            auto &res = m_tempos.back();
+            res.tempo = float( t );
+            res.period = 60 * m_odf_rate / res.tempo;
+            auto lag   = 60 * m_acf_rate / res.tempo;
+            res.lags = std::array<int,2>{ int(std::round(lag*0.5f)),int(std::round(lag))};
+        };
+        for(auto i = 50.f; i <= 180.f; i+= 2) {
+            make_tempo(i);
+        }
+    }
+
+	auto m_sig = 80/8.f;
+
+    auto bit = m_tempos.begin();
+    auto eit = m_tempos.end();
+    auto make_weight = [=](auto && x, auto && y){ return detail::gaussian_unorm<float>(x.tempo,m_sig,y.tempo);};
+    for(auto tit = bit+1;tit != eit;++tit) {
+        auto wt = weight_type{};
+        wt.dst_skip = tit-bit;
+        wt.weights.resize(eit - tit);
+        std::transform(tit,eit,bit,wt.weights.begin(),make_weight);
+        if(*std::max_element(wt.weights.cbegin(),wt.weights.cend()) <= m_weights_threshold)
+            break;
+        m_weights.push_back(std::move(wt));
+    }
+    for(auto tit = bit+1;tit != eit;++tit) {
+        auto wt = weight_type{};
+        wt.src_skip = tit-bit;
+        wt.weights.resize(eit - tit);
+        std::transform(bit,bit+wt.weights.size(),tit,wt.weights.begin(),make_weight);
+        if(*std::max_element(wt.weights.cbegin(),wt.weights.cend()) <= m_weights_threshold)
+            break;
+        m_weights.push_back(std::move(wt));
+    }
+    m_cum_buf = SlideBuffer<viterbi_type>(m_odf_buf_size);
+
+    m_delta = std::vector<viterbi_type>(m_tempos.size(),std::make_pair(1.f,0));
+    m_delta_prev = m_delta;
+
+    m_configured = true;
+}
+
+int btrack_beat_due_in_current_frame(const btrack * bt){
     return bt->beatDueInFrame;
 }
 
-float btrack_get_bpm(const struct btrack * bt){
+float btrack_get_bpm(const btrack * bt){
     return bt->estimatedTempo;
 }
 
-float btrack_get_latest_score(const struct btrack * bt){
+float btrack_get_latest_score(const btrack * bt){
     return bt->latestCumulativeScoreValue;
 }
 
-float btrack_get_latest_odf(const struct btrack * bt){
+float btrack_get_latest_odf(const btrack * bt){
     return bt->latestODF;
 }
 
-float btrack_get_latest_confidence(const struct btrack * bt){
+float btrack_get_latest_confidence(const btrack * bt){
     return bt->latestConfidence;
 }
 
-int btrack_get_frames_until_beat(const struct btrack * bt) {
+int btrack_get_frames_until_beat(const btrack * bt) {
     return bt->beatCounter;
 }
 
-float btrack_get_time_until_beat(const struct btrack * bt) {
+float btrack_get_time_until_beat(const btrack * bt) {
     auto n_frames = btrack_get_frames_until_beat(bt);
-    return n_frames * bt->hopSize * bt->invSampleRate;
+    return n_frames * bt->m_odf_time;
 }
 
-void btrack_process_audio_frame(struct btrack * bt, const btrack_chunk_t * frame){
+void btrack_process_audio_frame(btrack * bt, const btrack_chunk_t * frame){
     auto sample = bt->m_odf.process_frame(frame);
     btrack_process_odf_sample(bt, sample);
 }
 
-void btrack_process_fft_frame(struct btrack * bt, const btrack_chunk_t * frame){
+void btrack_process_fft_frame(btrack * bt, const btrack_chunk_t * frame){
     auto sample = bt->m_odf.process_fft_frame( frame);
     btrack_process_odf_sample(bt, sample);
 }
 
-void btrack_process_odf_sample(struct btrack * bt, float odf_sample){
+void btrack_process_odf_sample(btrack * bt, float odf_sample){
     // we need to ensure that the onset
     // detection function sample is positive
     // add a tiny constant to the sample to stop it from ever going
@@ -256,7 +351,7 @@ void btrack_process_odf_sample(struct btrack * bt, float odf_sample){
 	}
 }
 
-void btrack_set_bpm(struct btrack * bt, float bpm){
+void btrack_set_bpm(btrack * bt, float bpm){
 	/////////// TEMPO INDICATION RESET //////////////////
 
 	// firstly make sure tempo is between 80 and 160 bpm..
@@ -281,7 +376,7 @@ void btrack_set_bpm(struct btrack * bt, float bpm){
 	/////////// CUMULATIVE SCORE ARTIFICAL TEMPO UPDATE //////////////////
 
 	// calculate new beat period
-	int new_bperiod = (int) std::round(60/((((float) bt->hopSize)/44100)*bpm));
+	int new_bperiod = (int) std::round(60/((((float) bt->m_hop_size)/44100)*bpm));
 
 	int bcounter = 1;
 	// initialise df_buffer to zeros
@@ -310,7 +405,7 @@ void btrack_set_bpm(struct btrack * bt, float bpm){
 	bt->m0 = (int) round(((float) new_bperiod)/2);
 }
 
-void btrack_fix_bpm(struct btrack * bt, float bpm){
+void btrack_fix_bpm(btrack * bt, float bpm){
 	// firstly make sure tempo is between 80 and 160 bpm..
 	while (bpm > 160) {
 		bpm = bpm/2;
@@ -334,14 +429,18 @@ void btrack_fix_bpm(struct btrack * bt, float bpm){
 	bt->tempoFixed = true;
 }
 
-void btrack_nofix_bpm(struct btrack * bt){
+void btrack_nofix_bpm(btrack * bt){
 	// set the tempo fix flag
 	bt->tempoFixed = false;
 }
 
-void btrack_set_hop_size(struct btrack * bt, int hop_size){
-    bt->hopSize = hop_size;
-	bt->onsetDFBufferSize = (512*512)/bt->hopSize;		// calculate df buffer size
+void btrack_set_hop_size(btrack * bt, int hop_size){
+    bt->m_sample_time = 1/bt->m_sample_rate;
+    bt->m_hop_size  = hop_size;
+    bt->m_odf_rate  = bt->m_sample_rate / bt->m_hop_size;
+    bt->m_odf_time  = 1/bt->m_odf_rate;
+
+	bt->onsetDFBufferSize = (512*512)/bt->m_hop_size;		// calculate df buffer size
 
     bt->onsetDF = std::make_unique<float[]>(bt->onsetDFBufferSize);
     BTRACK_ASSERT(bt->onsetDF);
@@ -353,7 +452,7 @@ void btrack_set_hop_size(struct btrack * bt, int hop_size){
     bt->w1 = std::make_unique<float[]>(bt->onsetDFBufferSize);
     BTRACK_ASSERT(bt->w1);
 
-    bt->beatPeriod = std::round(60/((((float) bt->hopSize)/44100)*bt->tempo));
+    bt->beatPeriod = std::round(60/((((float) bt->m_hop_size)/44100)*bt->tempo));
     // initialise df_buffer to zeros
     for (int i = 0;i < bt->onsetDFBufferSize;i++) {
         bt->onsetDF[i] = 0;
@@ -366,7 +465,7 @@ void btrack_set_hop_size(struct btrack * bt, int hop_size){
 
 //=======================================================================
 
-static void resampleOnsetDetectionFunction(struct btrack * bt) {
+static void resampleOnsetDetectionFunction(btrack * bt) {
 	float output[512];
     float * input = static_cast<float*>(alloca(bt->onsetDFBufferSize * sizeof(float)));
     BTRACK_ASSERT(input);
@@ -397,8 +496,31 @@ static void resampleOnsetDetectionFunction(struct btrack * bt) {
 		bt->resampledOnsetDF[i] = (float) src_data.data_out[i];
 	}
 }
-
-static void calculateTempo(struct btrack * bt){
+static void update_w1(btrack *bt) {
+	// create window
+    if(bt->beatPeriod != bt->w1period) {
+        auto sigma = detail::recip(bt->tightness);
+        auto v = int(-std::pow(2.0f,3*sigma) * bt->beatPeriod);//int(std::round(-2.0f * bt->beatPeriod));
+        auto e = int(-std::pow(0.5f,3*sigma) * bt->beatPeriod);//int(std::round(-2.0f * bt->beatPeriod));
+        auto w = 0.0f;
+        auto mu    = bt->beatPeriod;
+        auto thresh= bt->w1threshold;
+        auto w1    = &bt->w1[0];
+        for(;v < e;++v) {
+            w = detail::gaussian_warp(float(v),sigma,mu);
+            if(w >= thresh)
+                break;
+        }
+        bt->w1start = v++;
+        *w1++ = w;
+        for(;v < e && w >= thresh;) {
+            *w1++ = w = detail::gaussian_warp(float(v++),sigma,mu);
+        }
+        bt->w1end = v;
+        bt->w1period = bt->beatPeriod;
+    }
+}
+static void calculateTempo(btrack * bt){
 	// adaptive threshold on input
 	retrack::detail::adaptive_threshold(bt->resampledOnsetDF,bt->resampledOnsetDF + 512, 15);
 
@@ -456,12 +578,12 @@ static void calculateTempo(struct btrack * bt){
 		bt->prevDelta[j] = bt->delta[j];
 	}
 
-	bt->beatPeriod = std::round((60.0*44100.0)/(((2*maxind)+80)*((double) bt->hopSize)));
+	bt->beatPeriod = std::round((60.0*44100.0)/(((2*maxind)+80)*((double) bt->m_hop_size)));
 	if (bt->beatPeriod > 0) {
-		bt->estimatedTempo = 60.0/((((double) bt->hopSize) / 44100.0)*bt->beatPeriod);
+		bt->estimatedTempo = 60.0/((((double) bt->m_hop_size) / 44100.0)*bt->beatPeriod);
 	}
 }
-static void calculateOutputOfCombFilterBank(struct btrack * bt) {
+static void calculateOutputOfCombFilterBank(btrack * bt) {
 	int numelem;
 
 	for (int i = 0;i < 128;i++) {
@@ -481,60 +603,27 @@ static void calculateOutputOfCombFilterBank(struct btrack * bt) {
 		}
 	}
 }
-static void updateCumulativeScore(struct btrack * bt, float odfSample) {
-	float max, maxw, min;
-
-
-	float wcumscore;
-
-
-	// create window
-    if(bt->beatPeriod != bt->w1size) {
-        auto start = int(bt->onsetDFBufferSize - round(2*bt->beatPeriod));
-        auto end = int(bt->onsetDFBufferSize - round(bt->beatPeriod/2));
-        auto winsize = end-start+1;
-        auto v = -2*bt->beatPeriod;
-        auto sigma = detail::recip(bt->tightness);
-        for (int i = 0;i < winsize;i++) {
-            bt->w1[i] = detail::gaussian_warp(v, sigma, bt->beatPeriod);
-    //        exp((-1*pow(bt->tightness*log(-v/bt->beatPeriod),2))/2);
-            v = v+1;
-        }
-        bt->w1size = bt->beatPeriod;
-    }
-
+static void updateCumulativeScore(btrack * bt, float odfSample) {
+    update_w1(bt);
 	// calculate new cumulative score value
-	maxw = 0;
-    max = 0;
-    min = bt->cumulativeScore[start];
-	int n = 0;
-	for (int i=start;i <= end;i++) {
-        wcumscore = bt->cumulativeScore[i]*bt->w1[n];
-        if (wcumscore > maxw) {
-            maxw = wcumscore;
-        }
-        if (bt->cumulativeScore[i] < min) {
-            min = bt->cumulativeScore[i];
-        }
-        if (bt->cumulativeScore[i] > max) {
-            max = bt->cumulativeScore[i];
-        }
-		n++;
-	}
+    auto winsize = bt->w1end - bt->w1start;
+    auto bcs = &bt->cumulativeScore[0];
+    auto maxw= 0.f;
+    {
+        auto cs = bcs + bt->onsetDFBufferSize + bt->w1start;
+        auto w1 = &bt->w1[0];
+        for (auto i = 0; i < winsize; ++i)
+            maxw = std::max(*cs++ * *w1++,maxw);
+    }
+    bt->latestCumulativeScoreValue = bcs[0] = retrack::lerp(odfSample,maxw, bt->alpha,1.0f);
+    std::rotate(bcs,bcs+1,bcs+bt->onsetDFBufferSize);
 
-
-	// shift cumulative score back one
-	for (int i = 0;i < (bt->onsetDFBufferSize-1);i++) {
-		bt->cumulativeScore[i] = bt->cumulativeScore[i+1];
-	}
-
+    auto p = std::minmax_element(bcs,bcs+bt->onsetDFBufferSize);
 	// add new value to cumulative score
-	bt->cumulativeScore[bt->onsetDFBufferSize-1] = ((1-bt->alpha)*odfSample) + (bt->alpha*maxw);
-	bt->latestCumulativeScoreValue = bt->cumulativeScore[bt->onsetDFBufferSize-1];
-    bt->latestConfidence = 1.0 - (min / max);
+    bt->latestConfidence = 1.0 - (*p.first)/(*p.second);
 }
 
-static void predictBeat(struct btrack * bt){
+static void predictBeat(btrack * bt){
 	int windowSize = (int) bt->beatPeriod;
 	float futureCumulativeScore[bt->onsetDFBufferSize + windowSize + 1];
     float w2[windowSize + 1];
@@ -543,55 +632,39 @@ static void predictBeat(struct btrack * bt){
 	for (int i = 0;i < bt->onsetDFBufferSize;i++) {
 		futureCumulativeScore[i] = bt->cumulativeScore[i];
 	}
-
+    update_w1(bt);
 	// create future window
 	for (int i = 0;i < windowSize;i++) {
-		w2[i] = detail::gaussian_unorm(float(i+1), bt->beatPeriod/2.f, bt->beatPeriod/2.f);
+		w2[i] = detail::gaussian_unorm(float(i+1), bt->beatPeriod*0.5f, bt->beatPeriod*0.5f);
 	}
-	// create window
-    if(bt->beatPeriod != bt->w1size) {
-        auto start = int(bt->onsetDFBufferSize - round(2*bt->beatPeriod));
-        auto end = int(bt->onsetDFBufferSize - round(bt->beatPeriod/2));
-        auto winsize = end-start+1;
-        auto v = -2*bt->beatPeriod;
-        auto sigma = detail::recip(bt->tightness);
-        for (auto i = 0;i < winsize;) {
-            bt->w1[i++] = detail::gaussian_warp(v++, sigma, bt->beatPeriod);
-        }
-        bt->w1size = bt->beatPeriod;
-    }
 	// calculate future cumulative score
-	float max;
 	int n;
-	float wcumscore;
-	for (int i = bt->onsetDFBufferSize;i < (bt->onsetDFBufferSize + windowSize); i++) {
-		start = i - round(2*bt->beatPeriod);
-		end = i - round(bt->beatPeriod/2);
-
-		max = 0;
+	for (auto i = bt->onsetDFBufferSize;i < (bt->onsetDFBufferSize + windowSize); i++) {
+		auto start = int(i - round(2*bt->beatPeriod));
+		auto end = int(i - round(bt->beatPeriod/2));
+        auto wcumscore = 0.f;
 		n = 0;
         wcumscore = 0.f;
-		for (int k=start;k <= end;k++) {
+		for (auto k=start;k <= end;k++) {
 			wcumscore = std::max(wcumscore,futureCumulativeScore[k]*bt->w1[n]);
 			n++;
 		}
-
 		futureCumulativeScore[i] = wcumscore;
 	}
+    {
+        // predict beat
+        auto max = 0;
+        auto n = 0;
 
-
-	// predict beat
-	max = 0;
-	n = 0;
-
-	for (auto i = bt->onsetDFBufferSize;i < (bt->onsetDFBufferSize+windowSize);i++) {
-		wcumscore = futureCumulativeScore[i]*w2[n];
-		if (wcumscore > max) {
-			max = wcumscore;
-			bt->beatCounter = n;
-		}
-		n++;
-	}
-	// set next prediction time
-	bt->m0 = bt->beatCounter+round(bt->beatPeriod/2);
+        for (auto i = bt->onsetDFBufferSize;i < (bt->onsetDFBufferSize+windowSize);i++) {
+            auto wcumscore = futureCumulativeScore[i]*w2[n];
+            if (wcumscore > max) {
+                max = wcumscore;
+                bt->beatCounter = n;
+            }
+            n++;
+        }
+        // set next prediction time
+        bt->m0 = bt->beatCounter+round(bt->beatPeriod/2);
+    }
 }

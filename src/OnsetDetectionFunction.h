@@ -33,7 +33,9 @@
 #include <numeric>
 #include <limits>
 #include <iterator>
+
 #include "Plan.hpp"
+#include "SlideBuffer.hpp"
 
 //=======================================================================
 /** The type of onset detection function to calculate */
@@ -69,8 +71,9 @@ enum WindowType
 struct odf {
     using Plan = retrack::Plan;
     using float_type = Plan::float_type;
-	int frameSize;						/**< audio framesize */
-	int hopSize;						/**< audio hopsize */
+    float sampleRate;
+	int   frameSize;						/**< audio framesize */
+	int   hopSize;						/**< audio hopsize */
 	OnsetDetectionFunctionType type;		/**< type of detection function */
     WindowType windowType;                     /**< type of window used in calculations */
     Plan p;
@@ -79,7 +82,8 @@ struct odf {
 
 	int initialised;					/**< flag indicating whether buffers and FFT plans are initialised */
 
-    std::unique_ptr<float[]> frame;
+    retrack::SlideBuffer<float>       frame;
+//    std::unique_ptr<float[]> frame;
     std::unique_ptr<float[]> window;                     /**< audio frame */
 
 	float prevEnergySum;				/**< to hold the previous energy sum value */
@@ -92,20 +96,11 @@ struct odf {
     std::unique_ptr<float[]> prevPhase2;                 /**< second order previous phase values */
 
     odf() = default;;
-    odf(int hop_size, int frame_size, OnsetDetectionFunctionType odf_type, WindowType window_type);
+    odf(int hop_size, int frame_size, float rate, OnsetDetectionFunctionType odf_type, WindowType window_type);
   ~odf();
     float process_frame(const btrack_chunk_t * buffer);
     float process_fft_frame(const btrack_chunk_t * fft_buffer); // XXX: This is not implemented yet
     void set_type(enum OnsetDetectionFunctionType type);
-
 };
-
-/** Constructor
-* @param hopSize_ the hop size in audio samples
-* @param frameSize_ the frame size in audio samples
-* @param onsetDetectionFunctionType_ the type of onset detection function to use - (see OnsetDetectionFunctionType)
-* @param windowType the type of window to use (see WindowType)
-*/
-
 
 #endif

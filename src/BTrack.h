@@ -43,14 +43,27 @@
  * contains some static functions for calculating beat times in seconds
  */
 struct btrack {
-    btrack(int hop_size, int frame_size, int sample_rate);
+    btrack(int hop_size, int frame_size, float sample_rate);
     btrack() = default;
    ~btrack() = default;
-    odf m_odf;
-    int frameSize;
-    float invSampleRate;
-    retrack::SlideBuffer<float>                  m_odf_buf{};
-    retrack::SlideBuffer<std::pair<float,int> >  m_cum_buf{};
+
+    void configure();
+    bool    m_configured{false};
+    odf     m_odf;
+    float   m_sample_rate;
+    int     m_frame_size;
+    int     m_hop_size;
+    float   m_odf_rate;
+    float   m_acf_rate;
+
+    float m_sample_time;
+    float m_odf_time;
+    float m_acf_time;
+
+    float m_acf_duration;
+    int   m_odf_buf_size;
+    int   m_acf_buf_size;
+    int   m_acf_size;
 
     retrack::ACF m_acf{};
 
@@ -58,7 +71,36 @@ struct btrack {
            /**< to hold onset detection function */
     std::unique_ptr<float[]> cumulativeScore;               /**< to hold cumulative score */
     std::unique_ptr<float[]> w1;
-    float                    w1size{};
+    float                    w1period{};
+    int                      w1start{};
+    int                      w1end{};
+    float                    w1threshold{};
+
+    struct tempo_type {
+        float   tempo{};
+        float   period{};
+        std::array<int, 2> lags{};
+    };
+    std::vector<tempo_type> m_tempos{};
+
+    struct weight_type{
+        int src_skip{};
+        int dst_skip{};
+        std::vector<float> weights{};
+    };
+    std::vector<weight_type> m_weights{};
+    float                    m_weights_threshold{};
+
+    using viterbi_type = std::pair<float, int>;
+
+    retrack::SlideBuffer<float>        m_odf_buf{};
+    retrack::SlideBuffer<viterbi_type> m_cum_buf{};
+    std::vector<float>                 m_acf_buf{};
+    std::vector<float>                 m_comb_buf{};
+
+    std::vector<viterbi_type>          m_delta{};
+    std::vector<viterbi_type>          m_delta_prev{};
+    std::vector<viterbi_type>          m_delta_fixed{};
 
     float resampledOnsetDF[512];           /**< to hold resampled detection function */
     float acf[512];                        /**<  to hold autocorrelation function */
@@ -86,7 +128,6 @@ struct btrack {
     float tempoToLagFactor;                /**< factor for converting between lag and tempo */
     int m0;                                 /**< indicates when the next point to predict the next beat is */
     int beatCounter;                        /**< keeps track of when the next beat is - will be zero when the beat is due, and is set elsewhere in the algorithm to be positive once a beat prediction is made */
-    int hopSize;                            /**< the hop size being used by the algorithm */
     int onsetDFBufferSize;                  /**< the onset detection function buffer size */
     int tempoFixed;                         /**< indicates whether the tempo should be fixed or not */
     int beatDueInFrame;                     /**< indicates whether a beat is due in the current frame */
